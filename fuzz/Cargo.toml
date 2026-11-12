@@ -1,0 +1,57 @@
+[package]
+name = "nautilus-qfex-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Keeps this package out of the parent crate.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+nautilus-qfex = { path = ".." }
+
+[[bin]]
+name = "auth"
+path = "fuzz_targets/auth.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "book_apply"
+path = "fuzz_targets/book_apply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mds_parse"
+path = "fuzz_targets/mds_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rest_parse"
+path = "fuzz_targets/rest_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trade_parse"
+path = "fuzz_targets/trade_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wire_format"
+path = "fuzz_targets/wire_format.rs"
+test = false
+doc = false
+bench = false
