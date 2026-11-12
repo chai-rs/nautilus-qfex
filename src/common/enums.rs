@@ -3,8 +3,8 @@
 use nautilus_model::{
     data::BarType,
     enums::{
-        AggregationSource, AggressorSide, AssetClass, BarAggregation, OrderSide, OrderType,
-        PriceType, TimeInForce,
+        AggregationSource, AggressorSide, AssetClass, BarAggregation, MarketStatusAction,
+        OrderSide, OrderType, PriceType, TimeInForce,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -262,6 +262,20 @@ pub enum QfexSymbolStatus {
     Delisted,
     #[serde(other)]
     Unknown,
+}
+
+impl QfexSymbolStatus {
+    /// The market status the docs describe: active, "temporarily suspended", "permanently
+    /// suspended". `None` for a value this adapter does not know.
+    #[must_use]
+    pub const fn as_market_status_action(self) -> Option<MarketStatusAction> {
+        match self {
+            Self::Active => Some(MarketStatusAction::Trading),
+            Self::Inactive => Some(MarketStatusAction::Suspend),
+            Self::Delisted => Some(MarketStatusAction::NotAvailableForTrading),
+            Self::Unknown => None,
+        }
+    }
 }
 
 /// Maps the `product_category` of `/refdata` to an asset class.

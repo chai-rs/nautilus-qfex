@@ -41,6 +41,7 @@ use nautilus_model::{
     types::{AccountBalance, MarginBalance},
 };
 use parking_lot::Mutex;
+use rust_decimal::Decimal;
 use tokio::{
     sync::{RwLock, mpsc::UnboundedReceiver, oneshot},
     task::JoinHandle,
@@ -74,6 +75,8 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 const OPEN_ORDERS_LIMIT: u32 = 1_000;
 /// Venue times are compared with the local clock when catching up: allow this much skew.
 const CATCH_UP_MARGIN_NS: u64 = 60_000_000_000;
+/// Most pages one report request follows: 20,000 rows.
+const MAX_PAGES: u32 = 20;
 
 fn now() -> UnixNanos {
     get_atomic_clock_realtime().get_time_ns()
@@ -83,13 +86,12 @@ fn spawn(future: impl Future<Output = ()> + Send + 'static) -> JoinHandle<()> {
     get_runtime().spawn(future)
 }
 
+/// The first page of a REST report request; [`all_pages`] follows the others.
 fn page_of(
     symbol: Option<String>,
     start: Option<UnixNanos>,
     end: Option<UnixNanos>,
 ) -> QfexUserQuery {
-    // shortcut: one page of `MAX_PAGE_LIMIT` rows per REST report request; page with `offset`
-    // when an account closes more orders or trades more than that between two reconciliations.
     QfexUserQuery {
         symbol,
         start,
@@ -97,6 +99,36 @@ fn page_of(
         limit: Some(MAX_PAGE_LIMIT),
         ..Default::default()
     }
+}
+
+fn at_offset(query: &QfexUserQuery, offset: u32) -> QfexUserQuery {
+    QfexUserQuery {
+        // The first page goes out as before paging: without `offset`.
+        offset: (offset > 0).then_some(offset),
+        ..query.clone()
+    }
+}
+
+/// Reads an `offset`-paged request, pages of `limit` rows, until a page comes back short.
+// unverified: `limit` and `offset` are in the docs; that a short page is the last one is assumed.
+async fn all_pages<T, Fut>(limit: u32, mut page: impl FnMut(u32) -> Fut) -> anyhow::Result<Vec<T>>
+where
+    Fut: Future<Output = anyhow::Result<Vec<T>>>,
+{
+    let mut rows = Vec::new();
+    for number in 0..MAX_PAGES {
+        let batch = page(number * limit).await?;
+        let last = batch.len() < limit as usize;
+        rows.extend(batch);
+        if last {
+            return Ok(rows);
+        }
+    }
+    // shortcut: stops after `MAX_PAGES` pages and returns what it has, and a row that arrives
+    // between two pages shifts the offsets (one row can come twice); page by time window when
+    // an account closes or trades more than 20,000 rows between two reconciliations.
+    log::warn!("QFEX report cut after {MAX_PAGES} pages: older rows are missing");
+    Ok(rows)
 }
 
 fn symbol_of(instrument_id: Option<&InstrumentId>) -> anyhow::Result<Option<String>> {
@@ -135,8 +167,10 @@ struct Shared {
     emitter: ExecutionEventEmitter,
     account_id: AccountId,
     /// Requests for the open orders that wait for an `all_orders_response`. The answer has no
-    /// request id, but every request asks the same, so any answer serves the oldest waiter.
+    /// request id: answers serve the waiters in order.
     waiting_for_orders: Mutex<VecDeque<oneshot::Sender<QfexWsOrders>>>,
+    /// One reader of the open orders at a time, so that the pages of two readers cannot swap.
+    reading_orders: tokio::sync::Mutex<()>,
     /// Local time from which a catch-up after a reconnect has to look.
     caught_up_ns: AtomicU64,
 }
@@ -170,23 +204,28 @@ impl Shared {
 
     /// Open orders and open stop orders, over the trade socket.
     async fn open_orders(&self) -> anyhow::Result<Vec<QfexWsOrder>> {
-        let (tx, rx) = oneshot::channel();
-        self.waiting_for_orders.lock().push_back(tx);
-        // shortcut: one page; an account with more than 1,000 open orders needs `offset`.
-        self.send(&QfexTradeRequest::GetUserOrders {
-            limit: OPEN_ORDERS_LIMIT,
-            offset: 0,
+        let _reading = self.reading_orders.lock().await;
+        // A page counts orders and stop orders together: right whether the venue applies
+        // `limit` to each list or to both, at the cost of one empty page in the first case.
+        all_pages(OPEN_ORDERS_LIMIT, |offset| async move {
+            let (tx, rx) = oneshot::channel();
+            self.waiting_for_orders.lock().push_back(tx);
+            self.send(&QfexTradeRequest::GetUserOrders {
+                limit: OPEN_ORDERS_LIMIT,
+                offset,
+            })
+            .await?;
+            let orders = tokio::time::timeout(ANSWER_TIMEOUT, rx)
+                .await
+                .context("QFEX did not answer get_user_orders")?
+                .context("QFEX refused get_user_orders or the trade socket reconnected")?;
+            Ok(orders
+                .orders
+                .into_iter()
+                .chain(orders.stop_orders)
+                .collect())
         })
-        .await?;
-        let orders = tokio::time::timeout(ANSWER_TIMEOUT, rx)
-            .await
-            .context("QFEX did not answer get_user_orders")?
-            .context("QFEX refused get_user_orders or the trade socket reconnected")?;
-        Ok(orders
-            .orders
-            .into_iter()
-            .chain(orders.stop_orders)
-            .collect())
+        .await
     }
 
     async fn open_order_reports(&self) -> anyhow::Result<Vec<OrderStatusReport>> {
@@ -210,7 +249,11 @@ impl Shared {
         query: &QfexUserQuery,
     ) -> anyhow::Result<Vec<OrderStatusReport>> {
         let ts_init = now();
-        let orders = self.http.get_historic_orders(query).await?.data;
+        let orders = all_pages(MAX_PAGE_LIMIT, |offset| async move {
+            let query = at_offset(query, offset);
+            Ok(self.http.get_historic_orders(&query).await?.data)
+        })
+        .await?;
         Ok(orders
             .iter()
             .filter_map(|order| {
@@ -244,7 +287,11 @@ impl Shared {
 
     async fn fill_reports(&self, query: &QfexUserQuery) -> anyhow::Result<Vec<FillReport>> {
         let ts_init = now();
-        let trades = self.http.get_user_trades(query).await?.data;
+        let trades = all_pages(MAX_PAGE_LIMIT, |offset| async move {
+            let query = at_offset(query, offset);
+            Ok(self.http.get_user_trades(&query).await?.data)
+        })
+        .await?;
         Ok(trades
             .iter()
             .filter_map(|trade| {
@@ -271,6 +318,30 @@ impl Shared {
                     .ok()
             })
             .collect())
+    }
+
+    async fn set_leverage(
+        &self,
+        instrument_id: InstrumentId,
+        leverage: Decimal,
+    ) -> anyhow::Result<()> {
+        let symbol = venue_symbol_of(&instrument_id)?;
+        anyhow::ensure!(
+            self.dispatch.instrument(&Ustr::from(symbol)).is_some(),
+            "QFEX has no symbol {symbol}"
+        );
+        Ok(self.http.set_leverage(symbol, leverage).await?)
+    }
+
+    fn cancel_not_sent(&self, cancel: &Cancel, e: &dyn std::fmt::Display) {
+        self.emitter.emit_order_cancel_rejected_event(
+            cancel.strategy_id,
+            cancel.instrument_id,
+            cancel.client_order_id,
+            cancel.venue_order_id,
+            &format!("not sent: {e}"),
+            now(),
+        );
     }
 
     /// Brings the engine up to date after a reconnect: what the venue sent while the socket
@@ -456,6 +527,23 @@ impl QfexExecutionClient {
             .context("QFEX execution client is not connected")
     }
 
+    /// Sets the leverage of one symbol with REST `POST /user/leverage`, as `update_leverage`
+    /// of `nautilus-lighter`. Nautilus has no such command: strategy or start-up code calls
+    /// this directly. The config field `leverages` does the same at connect.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client is not connected, the instrument is not a QFEX symbol,
+    /// or the venue refuses. The docs say it refuses while the symbol has an open order or a
+    /// position.
+    pub async fn set_leverage(
+        &self,
+        instrument_id: InstrumentId,
+        leverage: Decimal,
+    ) -> anyhow::Result<()> {
+        self.shared()?.set_leverage(instrument_id, leverage).await
+    }
+
     fn submit(&self, orders: Vec<OrderAny>) -> anyhow::Result<()> {
         let shared = self.shared()?;
         let mut requests = Vec::new();
@@ -537,14 +625,7 @@ impl QfexExecutionClient {
         spawn(async move {
             for (request, cancel) in requests {
                 if let Err(e) = shared.send(&request).await {
-                    shared.emitter.emit_order_cancel_rejected_event(
-                        cancel.strategy_id,
-                        cancel.instrument_id,
-                        cancel.client_order_id,
-                        cancel.venue_order_id,
-                        &format!("not sent: {e}"),
-                        now(),
-                    );
+                    shared.cancel_not_sent(&cancel, &e);
                 }
             }
         });
@@ -681,8 +762,17 @@ impl ExecutionClient for QfexExecutionClient {
             emitter: self.emitter.clone(),
             account_id: self.core.account_id,
             waiting_for_orders: Mutex::default(),
+            reading_orders: tokio::sync::Mutex::default(),
             caught_up_ns,
         });
+        for (instrument_id, leverage) in &config.leverages {
+            // Not fatal: the venue refuses a change while the symbol has an open order or a
+            // position, which is the usual state after a restart.
+            match shared.set_leverage(*instrument_id, *leverage).await {
+                Ok(()) => log::info!("QFEX leverage of {instrument_id} set to {leverage}"),
+                Err(e) => log::error!("QFEX leverage of {instrument_id} not set: {e}"),
+            }
+        }
         self.cancel = CancellationToken::new();
         self.tasks = vec![spawn(consume(shared.clone(), rx, self.cancel.clone()))];
         self.shared = Some(shared);
@@ -749,27 +839,59 @@ impl ExecutionClient for QfexExecutionClient {
     }
 
     fn cancel_all_orders(&self, cmd: CancelAllOrders) -> anyhow::Result<()> {
-        // One cancel per order of the strategy: the venue's `cancel_all_orders` would also
-        // cancel the orders of other strategies on the account.
-        let cancels = {
+        let shared = self.shared()?;
+        let symbol = Some(Ustr::from(venue_symbol_of(&cmd.instrument_id)?));
+        let (mass, single): (Vec<Cancel>, Vec<Cancel>) = {
             let cache = self.core.cache();
+            let instrument_id = Some(&cmd.instrument_id);
             let open = cache.orders_open(
                 None,
-                Some(&cmd.instrument_id),
+                instrument_id,
                 Some(&cmd.strategy_id),
                 None,
                 cmd.order_side,
             );
-            open.iter()
-                .map(|order| Cancel {
-                    strategy_id: order.strategy_id(),
-                    instrument_id: order.instrument_id(),
-                    client_order_id: order.client_order_id(),
-                    venue_order_id: order.venue_order_id(),
-                })
-                .collect()
+            // The venue's `cancel_all_orders` takes every order of the account on the symbol
+            // and has no side filter: it is used only when the cache knows no open order on
+            // the symbol that the command leaves out (another strategy, the other side).
+            // shortcut: an order on the symbol that the cache does not show as open (in
+            // flight, or placed outside Nautilus and not reconciled yet) is cancelled too;
+            // go back to one cancel per order if that is not acceptable.
+            let all = cache.orders_open(None, instrument_id, None, None, None);
+            let native = cmd.order_side.is_none() && open.len() == all.len();
+            // unverified: the docs do not say that `cancel_all_orders` reaches stop orders,
+            // so each stop order keeps its own cancel.
+            let (mass, single): (Vec<_>, Vec<_>) = open
+                .into_iter()
+                .partition(|order| native && !is_stop(order.order_type()));
+            for order in &mass {
+                // So that the `CANCELLED` rows come back as order events.
+                shared.dispatch.track(order);
+            }
+            let cancel = |order: &OrderAny| Cancel {
+                strategy_id: order.strategy_id(),
+                instrument_id: order.instrument_id(),
+                client_order_id: order.client_order_id(),
+                venue_order_id: order.venue_order_id(),
+            };
+            (
+                mass.iter().map(|order| cancel(order)).collect(),
+                single.iter().map(|order| cancel(order)).collect(),
+            )
         };
-        self.cancel(cancels)
+        self.cancel(single)?;
+        if !mass.is_empty() {
+            spawn(async move {
+                // unverified: the frame and the `CANCELLED` row per order are as in the docs.
+                let request = QfexTradeRequest::CancelAllOrders { symbol };
+                if let Err(e) = shared.send(&request).await {
+                    for cancel in &mass {
+                        shared.cancel_not_sent(cancel, &e);
+                    }
+                }
+            });
+        }
+        Ok(())
     }
 
     fn batch_cancel_orders(&self, cmd: BatchCancelOrders) -> anyhow::Result<()> {
@@ -849,5 +971,34 @@ impl ExecutionClient for QfexExecutionClient {
             reports.retain(|report| report.instrument_id == instrument_id);
         }
         Ok(reports)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_all_pages_stops_at_a_short_page_and_at_the_cap() {
+        // 25 rows in pages of 10: two full pages and a short one.
+        let asked = Mutex::new(Vec::new());
+        let rows = all_pages(10, |offset| {
+            asked.lock().push(offset);
+            async move { Ok((offset..25.min(offset + 10)).collect()) }
+        });
+        assert_eq!(rows.await.unwrap(), (0..25).collect::<Vec<_>>());
+        assert_eq!(*asked.lock(), [0, 10, 20]);
+
+        // A source without end is cut at the cap.
+        let rows = all_pages(10, |offset| async move { Ok(vec![offset; 10]) });
+        assert_eq!(rows.await.unwrap().len(), (MAX_PAGES * 10) as usize);
+    }
+
+    #[test]
+    fn test_only_later_pages_carry_an_offset() {
+        let query = page_of(None, None, None);
+        assert_eq!(at_offset(&query, 0).offset, None);
+        assert_eq!(at_offset(&query, 2000).offset, Some(2000));
+        assert_eq!(at_offset(&query, 2000).limit, Some(MAX_PAGE_LIMIT));
     }
 }

@@ -53,7 +53,7 @@ dashmap = "6.2.1"
 futures-util = "0.3.34"
 log = "0.4.34"
 parking_lot = "0.13.0"
-pyo3 = { version = "0.30.1", default-features = false, features = ["macros", "multiple-pymethods"], optional = true }
+pyo3 = { version = "0.30.1", default-features = false, features = ["macros", "multiple-pymethods", "rust_decimal"], optional = true }
 pyo3-async-runtimes = { version = "0.30.0", default-features = false, features = ["tokio-runtime"], optional = true }
 rust_decimal = { version = "1.43.0", features = ["serde-with-float"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -69,6 +69,7 @@ zeroize = "1.9.1"
 
 [dev-dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1", "json", "query", "ws"] }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 nautilus-live = { version = "=0.67.0", default-features = false, features = ["test-support"] }
 nautilus-testkit = { version = "=0.67.0", default-features = false, features = ["testers"] }
 rstest = "0.28.0"
@@ -85,3 +86,31 @@ name = "exec_tester"
 path = "examples/exec_tester.rs"
 doc = false
 required-features = ["examples"]
+
+# The binaries need no feature, as in nautilus-risex. Unlike there, `test` stays on: each file
+# has unit tests of its plan and of its lines.
+[[bin]]
+name = "qfex-trades-probe"
+path = "bin/trades_probe.rs"
+doc = false
+
+[[bin]]
+name = "qfex-flatten"
+path = "bin/flatten.rs"
+doc = false
+
+[[bench]]
+name = "book"
+harness = false
+
+[[bench]]
+name = "data"
+harness = false
+
+[[bench]]
+name = "exec"
+harness = false
+
+[[bench]]
+name = "signing"
+harness = false

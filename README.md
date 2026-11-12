@@ -1,7 +1,8 @@
 # nautilus-qfex
 
 QFEX perpetuals exchange adapter for NautilusTrader 0.67.0 (Rust). The parity target is
-`nautilus-risex`.
+`nautilus-risex`. On 12 Nov 2026 the features of `nautilus-lighter` 0.67.0 that the venue
+supports were added: the venue's mass cancel, leverage, report paging, instrument status.
 
 **Status: not run against the venue with a key.** All tests run offline against fixtures and a
 local mock server. Public market data ran once against mainnet without a key. No authenticated
@@ -14,6 +15,9 @@ request and no order went to QFEX; the HMAC signature has no test vector from QF
   with real funds. Start on UAT (`QfexEnvironment::Uat` in both configs).
 - The execution path follows the documentation alone. Do the UAT steps of `docs/STATUS.md`
   before any mainnet order.
+- `qfex-flatten` cancels every order and closes every position of the account. It prints the
+  frames it will send and waits for Enter. It compiles and its plan is unit-tested; it was
+  never run against the venue. It does not see or cancel TWAPs.
 
 ## Run
 
@@ -29,8 +33,22 @@ cargo run --example data_tester --features examples
 cargo run --example exec_tester --features examples
 ```
 
-`data_tester` reads public mainnet data and uses no key. `exec_tester` needs the environment
-variables below.
+```bash
+cargo run --bin qfex-trades-probe -- US100-USD-PERP.QFEX 20
+```
+
+```bash
+cargo run --bin qfex-flatten        # mainnet
+cargo run --bin qfex-flatten uat    # UAT
+```
+
+```bash
+cargo bench --bench signing
+```
+
+`data_tester` and `qfex-trades-probe` read public mainnet data and use no key. `exec_tester`
+and `qfex-flatten` need the environment variables below. There is no key-revoke binary: QFEX
+keys are revoked in the web UI (Developer Settings), not over the API.
 
 | Variable | Use |
 |---|---|
@@ -39,7 +57,8 @@ variables below.
 | `QFEX_UAT_API_KEY`, `QFEX_UAT_API_SECRET` | The same two for UAT (`qfex.io`) |
 
 The process reads the keys at run time only and does not print them. The `Debug` output of the
-config and of the credential redacts the secret. The examples do not load a `.env` file.
+config and of the credential redacts the secret. The examples and the binaries do not load a
+`.env` file.
 
 ## Parity with `nautilus-risex`
 
@@ -64,6 +83,7 @@ config and of the credential redacts the secret. The examples do not load a `.en
 | Bar history request | Direct | REST `/candles` |
 | Mark price, index price | Direct | WS `mark_price`, `underlier` |
 | Funding rates | Direct | WS `funding`; history from REST `/funding` |
+| Instrument status | Emulated | REST `/refdata` field `status`, polled every 60 s |
 
 ### Orders (trade WebSocket; not run against the venue)
 
@@ -76,9 +96,10 @@ config and of the credential redacts the secret. The examples do not load a `.en
 | Reduce only | Direct | `reduce_only` |
 | Modify | Direct | `modify_order` / `modify_stop_order`; the venue gives a new order id |
 | Cancel, batch cancel | Direct | `cancel_order` / `cancel_stop_order`, one frame per order |
-| Cancel all | Emulated | One cancel per open order of the strategy |
+| Cancel all | Direct or emulated | `cancel_all_orders` for the symbol when that hits no other order; else one cancel per order |
 | Order list | Emulated | One `add_order` per order |
-| Cancel on disconnect | Direct | Config option, sent again after each reconnect |
+| Cancel on disconnect | Direct | Config `cancel_on_disconnect` (default off), sent after each login and reconnect |
+| Leverage | Direct | REST `POST /user/leverage`: config `leverages` at connect, `set_leverage` on the client at run time |
 
 ### Account and reconciliation (not run against the venue)
 
@@ -87,8 +108,8 @@ config and of the credential redacts the secret. The examples do not load a `.en
 | Account state | Direct | WS `balances`, REST `/user/positions` at connect |
 | Order events | Direct | WS `order_responses` |
 | Fill events | Direct | WS `fills`, one event per trade id |
-| Order status reports | Direct | Open: WS `get_user_orders`; closed: REST historic orders |
-| Fill reports | Direct | REST `/user/trade` |
+| Order status reports | Direct | Open: WS `get_user_orders`; closed: REST historic orders; paged |
+| Fill reports | Direct | REST `/user/trade`; paged |
 | Position reports | Direct | REST `/user/positions` |
 | Mass status | Emulated | Trait default over the three reports |
 | Catch-up after reconnect | Emulated | Fills, open orders, closed orders, balance |
@@ -100,7 +121,11 @@ config and of the credential redacts the secret. The examples do not load a `.en
 | HMAC signing (REST headers, WebSocket auth message) | Done; no vector from QFEX |
 | Python binding | Done (see Python) |
 | Fuzz package | Done; no target ran (see Fuzz) |
-| Benches, CI workflow, flatten binary | Not done |
+| Benches | Done: `book`, `data`, `exec`, `signing` (numbers in `docs/STATUS.md`) |
+| `qfex-flatten` | Done; compiles, never run against the venue |
+| `qfex-trades-probe` | Done; public market data socket, no key |
+| Key-revoke binary | Not on venue: keys are revoked in the web UI |
+| CI workflow | Done: `.github/workflows/ci.yml` (fmt, clippy, tests, 30 s per fuzz target); never ran on GitHub |
 | TWAP, subaccounts, transfers, deposits and withdrawals, builder codes | Not done |
 | Wallet (web3) authentication, OAuth | Not done |
 
@@ -111,10 +136,26 @@ config and of the credential redacts the secret. The examples do not load a `.en
 - **Bars** are polled from REST shortly after the bar closes, not pushed. Intervals: 1, 5, 15,
   30 minutes, 1 and 4 hours, 1 day; `LAST` price, external aggregation only. The event time of
   a bar is the **open** time of the candle. The bar volume is `usdVolume / close` when the venue
-  sends a zero base volume.
-- **Cancel all** reads the open orders of the strategy from the cache and cancels them one by
-  one. The venue's own mass cancel is not used: it would also cancel orders of other strategies.
-- **Reports** read one page of 1,000 rows per request. Older rows are not fetched.
+  sends a zero base volume. The market data socket has a `candle` channel, but the docs
+  describe neither its subscribe frame nor its messages, so it is not used (see
+  `docs/STATUS.md`).
+- **Cancel all** sends the venue's `cancel_all_orders` for the symbol when the command has no
+  side filter and the cache shows no other open order on the symbol. The venue's mass cancel
+  takes every order of the account on the symbol, so with a side filter, or with an open order
+  of another strategy on the symbol, the adapter sends one cancel per order as before. Stop
+  orders always get their own cancel. An order on the symbol that the cache does not show as
+  open (in flight, or placed outside Nautilus) is cancelled by the mass cancel too.
+- **Reports** follow the venue's `offset` paging in pages of 1,000 rows, up to 20 pages
+  (20,000 rows) per request; beyond that a warning is logged and older rows are missing. A row
+  that arrives between two pages can come twice.
+- **Instrument status** is the `status` of `/refdata`, read once a minute: `ACTIVE` is
+  `Trading`, `INACTIVE` is `Suspend`, `DELISTED` is `NotAvailableForTrading`. An event is sent
+  when the status is first read and when it changes, so a change is seen up to 60 s late. The
+  market data socket has no status channel. `market_hours` of `/refdata` are the hours of the
+  reference market, not trading hours of QFEX, and are not used.
+- **Leverage** from the config is set at connect. The venue refuses a change while the symbol
+  has an open order or a position; the refusal is logged and the connect goes on.
+  `QfexExecutionClient::set_leverage` returns the refusal to the caller.
 - **Market orders** are IOC at the venue. A FOK market order is denied.
 - **Prices and sizes** go on the wire as JSON numbers (the docs show numbers). Values with up to
   15 significant digits read back unchanged.
@@ -150,7 +191,8 @@ cargo +nightly fuzz run rest_parse
 ```
 
 The target bodies are in `src/fuzzing.rs`. `cargo test` runs each of them on 400 inputs from a
-fixed-seed generator, so they run without `cargo-fuzz` too.
+fixed-seed generator, so they run without `cargo-fuzz` too. The `fuzz` job of the CI workflow
+installs nightly and `cargo-fuzz` on the runner and runs each target for 30 seconds.
 
 ## License
 

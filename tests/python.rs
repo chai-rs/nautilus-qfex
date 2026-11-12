@@ -2,7 +2,7 @@
 
 #![cfg(feature = "python")]
 
-use nautilus_model::identifiers::AccountId;
+use nautilus_model::identifiers::{AccountId, InstrumentId};
 use nautilus_qfex::{
     common::{consts::QFEX, enums::QfexEnvironment},
     config::{data::QfexDataClientConfig, exec::QfexExecClientConfig},
@@ -14,6 +14,7 @@ use pyo3::{
     Bound, Py, Python,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyModule},
 };
+use rust_decimal::Decimal;
 
 fn module(py: Python<'_>) -> Bound<'_, PyModule> {
     let module = PyModule::new(py, "qfex").unwrap();
@@ -65,6 +66,12 @@ fn configs_construct_from_python(module: &Bound<'_, PyModule>) {
     kwargs.set_item("api_key", "test-public-key").unwrap();
     kwargs.set_item("api_secret", "not-a-real-secret").unwrap();
     kwargs.set_item("cancel_on_disconnect", true).unwrap();
+    let aapl = InstrumentId::from("AAPL-USD-PERP.QFEX");
+    let leverages = PyDict::new(py);
+    leverages
+        .set_item(Py::new(py, aapl).unwrap(), Decimal::from(5))
+        .unwrap();
+    kwargs.set_item("leverages", leverages).unwrap();
 
     let object = exec_class.call((), Some(&kwargs)).unwrap();
     let repr = object.repr().unwrap().to_string();
@@ -74,6 +81,8 @@ fn configs_construct_from_python(module: &Bound<'_, PyModule>) {
     assert_eq!(exec.environment, QfexEnvironment::Uat);
     assert_eq!(exec.api_secret.as_deref(), Some("not-a-real-secret"));
     assert!(exec.cancel_on_disconnect);
+    assert_eq!(exec.leverages, [(aapl, Decimal::from(5))].into());
+    assert_eq!(object.getattr("leverages").unwrap().len().unwrap(), 1);
     assert_eq!(exec.http_timeout_secs, 10);
 
     kwargs.set_item("environment", "MOON").unwrap();

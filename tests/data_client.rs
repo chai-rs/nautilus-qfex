@@ -22,14 +22,15 @@ use nautilus_common::{
         DataEvent,
         data::{
             DataResponse, RequestBars, RequestBookSnapshot, SubscribeBookDeltas,
-            SubscribeMarkPrices, SubscribeQuotes, SubscribeTrades, UnsubscribeQuotes,
+            SubscribeBookDepth, SubscribeInstrumentStatus, SubscribeMarkPrices, SubscribeQuotes,
+            SubscribeTrades, UnsubscribeQuotes,
         },
     },
 };
 use nautilus_core::{UUID4, UnixNanos};
 use nautilus_model::{
     data::{BarType, Data},
-    enums::{AggressorSide, BookAction, BookType},
+    enums::{AggressorSide, BookAction, BookType, MarketStatusAction},
     identifiers::{ClientId, InstrumentId},
     types::Price,
 };
@@ -371,4 +372,88 @@ async fn connect_subscribe_reconnect_request_and_disconnect() {
     assert!(client.is_disconnected());
     let failures = venue.failures.lock();
     assert!(failures.is_empty(), "{failures:?}");
+}
+
+/// A connected client; the instrument events of the connect are taken off the stream.
+async fn connected() -> (QfexDataClient, UnboundedReceiver<DataEvent>) {
+    let (config, _) = start_venue().await;
+    let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+    replace_data_event_sender(sender);
+    let mut client = QfexDataClient::new(ClientId::from("QFEX"), config).unwrap();
+    client.connect().await.unwrap();
+    while events.try_recv().is_ok() {}
+    (client, events)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn book_depth_is_ten_levels_of_the_pulsed_book() {
+    let (mut client, mut events) = connected().await;
+    let aapl = InstrumentId::from("AAPL-USD-PERP.QFEX");
+
+    client
+        .subscribe_book_depth(SubscribeBookDepth::new(
+            aapl,
+            BookType::L2_MBP,
+            Some(ClientId::from("QFEX")),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            false,
+            None,
+            None,
+        ))
+        .unwrap();
+
+    // The recorded `level2` frame has 20 levels a side. It also parses to deltas, which
+    // nobody subscribed to: the depth is the only event.
+    let Data::BookDepth(depth) = next_data(&mut events).await else {
+        panic!("expected a depth");
+    };
+    assert_eq!(depth.instrument_id, aapl);
+    assert_eq!((depth.bids.len(), depth.asks.len()), (10, 10));
+    assert_eq!(depth.bids[0].price, Price::from("348.08"));
+    assert_eq!(depth.bids[9].price, Price::from("347.77"));
+    assert_eq!(depth.asks[0].price, Price::from("348.11"));
+    assert_eq!(depth.asks[9].price, Price::from("348.39"));
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn instrument_status_comes_from_refdata() {
+    let (mut client, mut events) = connected().await;
+    let subscribe = |symbol: &str| {
+        SubscribeInstrumentStatus::new(
+            InstrumentId::from(symbol),
+            Some(ClientId::from("QFEX")),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        )
+    };
+
+    // The recorded `/refdata` has AAPL-USD as ACTIVE and KIA-KRW as INACTIVE.
+    client
+        .subscribe_instrument_status(subscribe("AAPL-USD-PERP.QFEX"))
+        .unwrap();
+    let Data::InstrumentStatus(status) = next_data(&mut events).await else {
+        panic!("expected a status");
+    };
+    assert_eq!(status.action, MarketStatusAction::Trading);
+    assert_eq!(status.is_trading, Some(true));
+
+    // The second subscription reads `/refdata` again: the unchanged status of the first
+    // instrument, which comes first in the list, is not sent a second time.
+    client
+        .subscribe_instrument_status(subscribe("KIA-KRW-PERP.QFEX"))
+        .unwrap();
+    let Data::InstrumentStatus(status) = next_data(&mut events).await else {
+        panic!("expected a status");
+    };
+    assert_eq!(status.instrument_id.to_string(), "KIA-KRW-PERP.QFEX");
+    assert_eq!(status.action, MarketStatusAction::Suspend);
+    assert_eq!(status.is_trading, Some(false));
+    assert!(events.try_recv().is_err());
 }

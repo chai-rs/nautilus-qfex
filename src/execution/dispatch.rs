@@ -24,7 +24,7 @@ use super::order::is_stop;
 use crate::{
     common::{
         enums::{QfexOrderType, QfexStatusKind, QfexTimeInForce},
-        parse::{price_from_decimal, quantity_from_decimal, unix_time_to_nanos},
+        parse::{price_from_decimal, quantity_from_decimal, unix_time_to_nanos, venue_symbol_of},
     },
     http::parse::liquidity_side_of,
     websocket::messages::{QfexWsError, QfexWsFill, QfexWsOrder},
@@ -514,6 +514,29 @@ impl OrderDispatch {
         );
 
         let mut state = self.state.lock();
+        if error.request_type() == Some("cancel_all_orders") {
+            // Every order the refused mass cancel was for stays open. Stop orders have their
+            // own cancel (see `cancel_all_orders` of the client).
+            let symbol = params["symbol"].as_str();
+            let mut any = false;
+            for tracked in state.orders.values().filter(|tracked| {
+                let order = &tracked.order;
+                !tracked.closed
+                    && !is_stop(order.order_type())
+                    && symbol.is_none_or(|symbol| {
+                        venue_symbol_of(&order.instrument_id()).ok() == Some(symbol)
+                    })
+            }) {
+                any = true;
+                self.emitter.emit_order_cancel_rejected(
+                    &tracked.order,
+                    tracked.venue_order_id,
+                    &reason,
+                    ts_init,
+                );
+            }
+            return any;
+        }
         let key = ["client_order_id", "order_id", "stop_order_id"]
             .into_iter()
             .filter_map(|name| params[name].as_str())
@@ -743,6 +766,18 @@ mod tests {
             order_event(&mut events),
             OrderEventAny::CancelRejected(_)
         ));
+        assert!(events.try_recv().is_err());
+
+        // A refused mass cancel: the open order of that symbol stays open, the closed one and
+        // other symbols are left alone.
+        let other_symbol = error("cancel_all_orders", json!({"symbol": "US100-USD"}));
+        assert!(!dispatch.handle_error(&other_symbol, UnixNanos::from(1)));
+        let mass = error("cancel_all_orders", json!({"symbol": "AAPL-USD"}));
+        assert!(dispatch.handle_error(&mass, UnixNanos::from(1)));
+        let OrderEventAny::CancelRejected(rejected) = order_event(&mut events) else {
+            panic!("not cancel rejected");
+        };
+        assert_eq!(rejected.client_order_id, ClientOrderId::from("O-2"));
         assert!(events.try_recv().is_err());
     }
 

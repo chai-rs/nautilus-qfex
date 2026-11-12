@@ -1,8 +1,9 @@
 //! Execution client configuration.
 
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use nautilus_model::identifiers::AccountId;
+use nautilus_model::identifiers::{AccountId, InstrumentId};
+use rust_decimal::Decimal;
 
 use crate::common::{consts::HTTP_TIMEOUT_SECS, enums::QfexEnvironment};
 
@@ -27,8 +28,12 @@ pub struct QfexExecClientConfig {
     pub api_key: Option<String>,
     /// HMAC secret; falls back to the environment variable.
     pub api_secret: Option<String>,
-    /// Asks the venue to cancel every open order when the trade socket drops.
+    /// Asks the venue to cancel every open order of the account when the trade socket drops.
+    /// Sent after each login, so also after a reconnect.
     pub cancel_on_disconnect: bool,
+    /// Leverage per instrument, set at connect. A refusal is logged and does not stop the
+    /// connect: the venue refuses a change while the symbol has an open order or a position.
+    pub leverages: HashMap<InstrumentId, Decimal>,
 }
 
 impl Default for QfexExecClientConfig {
@@ -44,6 +49,7 @@ impl Default for QfexExecClientConfig {
             api_key: None,
             api_secret: None,
             cancel_on_disconnect: false,
+            leverages: HashMap::new(),
         }
     }
 }
@@ -62,6 +68,7 @@ impl fmt::Debug for QfexExecClientConfig {
                 &self.api_secret.as_ref().map(|_| "<redacted>"),
             )
             .field("cancel_on_disconnect", &self.cancel_on_disconnect)
+            .field("leverages", &self.leverages)
             .finish_non_exhaustive()
     }
 }

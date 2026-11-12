@@ -1,8 +1,8 @@
 //! Live market data client.
 //!
 //! One public WebSocket (`mds`) feeds books, quotes, trades, mark and index prices and funding
-//! rates. No bar channel is documented: every bar subscription polls REST once per bar close.
-//! Nothing here needs credentials.
+//! rates. Bars poll REST once per bar close, and the instrument status polls `/refdata`: the
+//! socket has no channel for the status. Nothing here needs credentials.
 
 use std::{future::Future, sync::Arc, time::Duration};
 
@@ -20,9 +20,10 @@ use nautilus_common::{
             InstrumentsResponse, RequestBars, RequestBookSnapshot, RequestFundingRates,
             RequestInstrument, RequestInstruments, RequestTrades, SubscribeBars,
             SubscribeBookDeltas, SubscribeBookDepth, SubscribeFundingRates, SubscribeIndexPrices,
-            SubscribeInstrument, SubscribeInstruments, SubscribeMarkPrices, SubscribeQuotes,
-            SubscribeTrades, UnsubscribeBars, UnsubscribeBookDeltas, UnsubscribeBookDepth,
-            UnsubscribeFundingRates, UnsubscribeIndexPrices, UnsubscribeInstrument,
+            SubscribeInstrument, SubscribeInstrumentStatus, SubscribeInstruments,
+            SubscribeMarkPrices, SubscribeQuotes, SubscribeTrades, UnsubscribeBars,
+            UnsubscribeBookDeltas, UnsubscribeBookDepth, UnsubscribeFundingRates,
+            UnsubscribeIndexPrices, UnsubscribeInstrument, UnsubscribeInstrumentStatus,
             UnsubscribeInstruments, UnsubscribeMarkPrices, UnsubscribeQuotes, UnsubscribeTrades,
         },
     },
@@ -33,8 +34,8 @@ use nautilus_core::{
     time::{AtomicTime, get_atomic_clock_realtime},
 };
 use nautilus_model::{
-    data::{BarType, Data},
-    enums::BookType,
+    data::{BarType, Data, InstrumentStatus},
+    enums::{BookType, MarketStatusAction},
     identifiers::{ClientId, InstrumentId, Venue},
     instruments::{Instrument, InstrumentAny},
     orderbook::OrderBook,
@@ -45,12 +46,12 @@ use ustr::Ustr;
 use crate::{
     common::{
         consts::QFEX_VENUE,
-        enums::{QfexBarInterval, QfexMdsChannel},
+        enums::{QfexBarInterval, QfexMdsChannel, QfexSymbolStatus},
         parse::{instrument_id_of, venue_symbol_of},
         urls::qfex_mds_ws_url,
     },
     config::data::QfexDataClientConfig,
-    http::client::QfexHttpClient,
+    http::{client::QfexHttpClient, models::QfexSymbol},
     websocket::{
         QfexWebSocketClient, QfexWsClientError, QfexWsMessage, handler::parse_mds_message,
     },
@@ -58,6 +59,10 @@ use crate::{
 
 /// The venue closes a bar some time after the interval ends.
 const BAR_POLL_DELAY: Duration = Duration::from_secs(2);
+// shortcut: the status is read from the whole `/refdata` once a minute, so a suspension is
+// seen up to 60 s late; use a status channel if the venue adds one (`refdata` is not a
+// channel of the socket, 12 Nov 2026).
+const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// What a strategy subscribed to. Deltas and depth share the `level2` channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -120,6 +125,8 @@ struct Feed {
     ws: Arc<tokio::sync::Mutex<QfexWebSocketClient>>,
     instruments: Arc<DashMap<InstrumentId, InstrumentAny>>,
     subscriptions: Arc<DashSet<(Kind, InstrumentId)>>,
+    /// Instruments with a status subscription, and the status last sent for each.
+    statuses: Arc<DashMap<InstrumentId, Option<QfexSymbolStatus>>>,
     sender: EventSender<DataEvent>,
     clock: &'static AtomicTime,
 }
@@ -214,6 +221,47 @@ impl Feed {
         }
     }
 
+    /// Emits the status of each subscribed instrument when it is first read and when it
+    /// changes. The time of the event is the time of the poll: `/refdata` has none.
+    async fn poll_statuses(self) {
+        loop {
+            match self.http.get_refdata().await {
+                Ok(refdata) => {
+                    let now = self.clock.get_time_ns();
+                    for item in refdata.data {
+                        let Ok(symbol) = serde_json::from_value::<QfexSymbol>(item) else {
+                            continue;
+                        };
+                        let Ok(instrument_id) = instrument_id_of(symbol.symbol.as_str()) else {
+                            continue;
+                        };
+                        let Some(mut last) = self.statuses.get_mut(&instrument_id) else {
+                            continue;
+                        };
+                        let Some(action) = symbol.status.as_market_status_action() else {
+                            continue;
+                        };
+                        if last.replace(symbol.status) != Some(symbol.status) {
+                            self.send(Data::InstrumentStatus(InstrumentStatus::new(
+                                instrument_id,
+                                action,
+                                now,
+                                now,
+                                None,
+                                None,
+                                Some(action == MarketStatusAction::Trading),
+                                None,
+                                None,
+                            )));
+                        }
+                    }
+                }
+                Err(e) => log::warn!("QFEX instrument status poll failed: {e}"),
+            }
+            tokio::time::sleep(STATUS_POLL_INTERVAL).await;
+        }
+    }
+
     /// Disconnects the socket and forgets every subscription.
     async fn close(self, ws_url: String) {
         let mut ws = self.ws.lock().await;
@@ -221,6 +269,7 @@ impl Feed {
         // The client keeps its recorded subscriptions for the next connect: start a new one
         *ws = QfexWebSocketClient::new_mds(ws_url);
         self.subscriptions.clear();
+        self.statuses.clear();
     }
 }
 
@@ -232,6 +281,7 @@ pub struct QfexDataClient {
     feed: Feed,
     feed_task: Option<JoinHandle<()>>,
     bar_tasks: AHashMap<BarType, JoinHandle<()>>,
+    status_task: Option<JoinHandle<()>>,
     close_task: Option<JoinHandle<()>>,
     is_connected: bool,
 }
@@ -258,6 +308,7 @@ impl QfexDataClient {
             ))),
             instruments: Arc::new(DashMap::new()),
             subscriptions: Arc::new(DashSet::new()),
+            statuses: Arc::new(DashMap::new()),
             sender: get_data_event_sender(),
             clock: get_atomic_clock_realtime(),
         };
@@ -268,6 +319,7 @@ impl QfexDataClient {
             feed,
             feed_task: None,
             bar_tasks: AHashMap::new(),
+            status_task: None,
             close_task: None,
             is_connected: false,
         })
@@ -357,6 +409,9 @@ impl QfexDataClient {
             task.abort();
         }
         for (_, task) in self.bar_tasks.drain() {
+            task.abort();
+        }
+        if let Some(task) = self.status_task.take() {
             task.abort();
         }
         self.is_connected = false;
@@ -519,6 +574,26 @@ impl DataClient for QfexDataClient {
         self.subscribe_kind(Kind::FundingRates, &cmd.instrument_ids)
     }
 
+    fn subscribe_instrument_status(
+        &mut self,
+        cmd: SubscribeInstrumentStatus,
+    ) -> anyhow::Result<()> {
+        let result = execute_instrument_subscriptions(&cmd.instrument_ids, |instrument_id| {
+            self.instrument(&instrument_id)?;
+            self.feed.statuses.entry(instrument_id).or_insert(None);
+            Ok(())
+        });
+        if !self.feed.statuses.is_empty() {
+            // Started again, so that the new subscriber gets its status now and not at the
+            // next poll. What was sent before is kept: nothing is sent twice.
+            let task = get_runtime().spawn(self.feed.clone().poll_statuses());
+            if let Some(old) = self.status_task.replace(task) {
+                old.abort();
+            }
+        }
+        result
+    }
+
     fn subscribe_bars(&mut self, cmd: SubscribeBars) -> anyhow::Result<()> {
         execute_bar_subscriptions(&cmd.bar_types, |bar_type| {
             let interval = QfexBarInterval::try_from(&bar_type)?;
@@ -570,6 +645,21 @@ impl DataClient for QfexDataClient {
 
     fn unsubscribe_funding_rates(&mut self, cmd: &UnsubscribeFundingRates) -> anyhow::Result<()> {
         self.unsubscribe_kind(Kind::FundingRates, &cmd.instrument_ids)
+    }
+
+    fn unsubscribe_instrument_status(
+        &mut self,
+        cmd: &UnsubscribeInstrumentStatus,
+    ) -> anyhow::Result<()> {
+        for instrument_id in &cmd.instrument_ids {
+            self.feed.statuses.remove(instrument_id);
+        }
+        if self.feed.statuses.is_empty()
+            && let Some(task) = self.status_task.take()
+        {
+            task.abort();
+        }
+        Ok(())
     }
 
     fn unsubscribe_bars(&mut self, cmd: &UnsubscribeBars) -> anyhow::Result<()> {

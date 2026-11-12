@@ -40,7 +40,7 @@ use nautilus_live::ExecutionClientCore;
 use nautilus_model::{
     enums::{AccountType, LiquiditySide, OmsType, OrderSide, OrderStatus, OrderType},
     events::{AccountState, OrderEventAny},
-    identifiers::{ClientId, ClientOrderId, InstrumentId, TraderId, VenueOrderId},
+    identifiers::{ClientId, ClientOrderId, InstrumentId, StrategyId, TraderId, VenueOrderId},
     orders::{Order, OrderAny, OrderTestBuilder},
     types::{Money, Price, Quantity},
 };
@@ -48,6 +48,7 @@ use nautilus_qfex::{
     common::consts::QFEX_VENUE, config::exec::QfexExecClientConfig, execution::QfexExecutionClient,
 };
 use parking_lot::Mutex;
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tokio::sync::{Notify, broadcast, mpsc::UnboundedReceiver};
 
@@ -74,6 +75,10 @@ struct VenueState {
     nonces: HashSet<String>,
     open_orders: Vec<Value>,
     refuse_login: bool,
+    /// Bodies of `POST /user/leverage`.
+    posts: Vec<Value>,
+    /// When set, `/user/trade` has this many trades, served in pages.
+    trade_rows: usize,
 }
 
 #[derive(Clone)]
@@ -206,9 +211,12 @@ impl Venue {
                     .map(|channel| json!({"subscribed": channel}))
                     .collect()
             }
-            "get_user_orders" => vec![json!({"all_orders_response": {
-                "orders": state.open_orders, "twaps": [],
-            }})],
+            "get_user_orders" => {
+                let number = |name: &str| params[name].as_u64().unwrap_or_default() as usize;
+                let orders = state.open_orders.iter().skip(number("offset"));
+                let page: Vec<_> = orders.take(number("limit")).collect();
+                vec![json!({"all_orders_response": {"orders": page, "twaps": []}})]
+            }
             _ => vec![],
         }
     }
@@ -244,15 +252,16 @@ async fn upgrade(ws: WebSocketUpgrade, State(venue): State<Venue>, uri: Uri) -> 
     ws.on_upgrade(|socket| venue.serve(socket))
 }
 
-async fn http(State(venue): State<Venue>, uri: Uri, headers: HeaderMap) -> Response {
+async fn http(State(venue): State<Venue>, uri: Uri, headers: HeaderMap, body: String) -> Response {
     let (path, query) = (uri.path(), uri.query().unwrap_or_default());
     let name = match path {
         "/refdata" => "refdata",
         "/user/positions" => "user_positions",
         "/user/trade" => "user_trades",
         "/user/historic-orders" => "historic_orders",
+        "/user/leverage" => "leverage",
         _ => {
-            venue.fail(format!("unexpected GET {path}"));
+            venue.fail(format!("unexpected request {path}"));
             return StatusCode::NOT_FOUND.into_response();
         }
     };
@@ -274,7 +283,36 @@ async fn http(State(venue): State<Venue>, uri: Uri, headers: HeaderMap) -> Respo
             return StatusCode::UNAUTHORIZED.into_response();
         }
     }
-    venue.state.lock().gets.push(format!("{path}?{query}"));
+    let mut state = venue.state.lock();
+    if name == "leverage" {
+        // Hand-made: the docs do not show the answer, and the client reads the status only.
+        // A leverage above 100 is refused, as the venue refuses one it does not offer.
+        let body: Value = serde_json::from_str(&body).unwrap_or_default();
+        let refused = body["leverage"]
+            .as_f64()
+            .is_none_or(|leverage| leverage > 100.0);
+        state.posts.push(body);
+        return if refused {
+            (StatusCode::BAD_REQUEST, Json(fixture("problem"))).into_response()
+        } else {
+            Json(json!({})).into_response()
+        };
+    }
+    state.gets.push(format!("{path}?{query}"));
+    if name == "user_trades" && state.trade_rows > 0 {
+        // Hand-made: copies of the first fixture trade with their own ids, paged by `offset`.
+        let offset = query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("offset="));
+        let offset: usize = offset.map_or(0, |offset| offset.parse().unwrap());
+        let trade = &fixture(name)["data"][0];
+        let page = (offset..state.trade_rows.min(offset + 1000)).map(|number| {
+            let mut trade = trade.clone();
+            trade["id"] = json!(format!("T-{number}"));
+            trade
+        });
+        return Json(json!({"data": page.collect::<Vec<_>>()})).into_response();
+    }
     Json(fixture(name)).into_response()
 }
 
@@ -464,6 +502,21 @@ impl Harness {
         };
         assert_eq!(accepted.venue_order_id, VenueOrderId::from(order_id));
         frames.last().unwrap().clone()
+    }
+
+    fn cancel_all(&self, strategy_id: StrategyId, order_side: Option<OrderSide>) {
+        let cmd = CancelAllOrders::new(
+            trader_id(),
+            Some(client_id()),
+            strategy_id,
+            aapl(),
+            order_side,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        );
+        self.client.cancel_all_orders(cmd).unwrap();
     }
 
     fn cancel(&self, order: &OrderAny) {
@@ -702,25 +755,116 @@ async fn cancel_all_cancels_the_orders_of_the_strategy_one_by_one() {
     h.submit_accepted(&first, ORDER_ID).await;
     h.submit_accepted(&second, NEW_ORDER_ID).await;
 
-    let cmd = CancelAllOrders::new(
-        trader_id(),
-        Some(client_id()),
-        first.strategy_id(),
-        aapl(),
-        None,
-        UUID4::new(),
-        UnixNanos::default(),
-        None,
-        None,
-    );
-    h.client.cancel_all_orders(cmd).unwrap();
+    // With a side filter: the venue's mass cancel has none.
+    h.cancel_all(first.strategy_id(), Some(OrderSide::Buy));
 
     let cancels = h.venue.wait_frames("cancel_order", 2).await;
     let mut ids: Vec<_> = cancels.iter().map(|c| c["order_id"].clone()).collect();
     ids.sort_by_key(Value::to_string);
     assert_eq!(ids, [json!(ORDER_ID), json!(NEW_ORDER_ID)]);
-    // The venue's own mass cancel would hit other strategies too.
+    // The venue's own mass cancel would hit the other side too.
     assert!(h.venue.frames("cancel_all_orders").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_all_without_a_side_uses_the_mass_cancel_when_it_hits_nothing_else() {
+    let (mut h, _) = Harness::connect().await;
+    let first = limit("O-1");
+    let other_strategy = StrategyId::from("S-002");
+    let second = builder(OrderType::Limit, "O-2")
+        .strategy_id(other_strategy)
+        .price(Price::from("200.25"))
+        .build();
+    h.submit_accepted(&first, ORDER_ID).await;
+    h.submit_accepted(&second, NEW_ORDER_ID).await;
+
+    // Another strategy has an order on the symbol: the mass cancel would take it too.
+    h.cancel_all(first.strategy_id(), None);
+    let cancels = h.venue.wait_frames("cancel_order", 1).await;
+    assert_eq!(cancels[0]["order_id"], ORDER_ID);
+    h.venue.push(&row(ORDER_ID, "O-1", "CANCELLED"));
+    assert!(matches!(h.applied().await, OrderEventAny::Canceled(_)));
+    assert!(h.venue.frames("cancel_all_orders").is_empty());
+
+    // Now the open orders of the symbol are the orders of the command: one frame.
+    h.cancel_all(other_strategy, None);
+    let mass = h.venue.wait_frames("cancel_all_orders", 1).await;
+    assert_eq!(mass, [json!({"symbol": "AAPL-USD"})]);
+    // As in the docs: one `CANCELLED` row for each order.
+    h.venue.push(&row(NEW_ORDER_ID, "O-2", "CANCELLED"));
+    let OrderEventAny::Canceled(canceled) = h.applied().await else {
+        panic!("not canceled");
+    };
+    assert_eq!(canceled.client_order_id, second.client_order_id());
+    assert_eq!(h.venue.frames("cancel_order").len(), 1);
+    h.assert_no_pending_events().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leverage_is_set_at_connect_and_on_request() {
+    let crude = InstrumentId::from("CL-USD-PERP.QFEX");
+    let (h, connected) = Harness::start(|config, _| {
+        config.leverages = [(aapl(), dec!(5)), (crude, dec!(500))].into();
+    })
+    .await;
+    // The stand-in refuses 500: a refused leverage does not stop the connect.
+    connected.unwrap();
+    let mut posts = h.venue.state.lock().posts.clone();
+    posts.sort_by_key(Value::to_string);
+    assert_eq!(
+        posts,
+        [
+            json!({"symbol": "AAPL-USD", "leverage": 5.0}),
+            json!({"symbol": "CL-USD", "leverage": 500.0})
+        ]
+    );
+
+    h.client.set_leverage(aapl(), dec!(3)).await.unwrap();
+    assert_eq!(
+        h.venue.state.lock().posts[2],
+        json!({"symbol": "AAPL-USD", "leverage": 3.0})
+    );
+    let refused = h.client.set_leverage(aapl(), dec!(500)).await;
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("Bad Request"), "{refused}");
+    // Not a QFEX symbol: nothing is sent.
+    let unknown = InstrumentId::from("NOPE-USD-PERP.QFEX");
+    let unknown = h.client.set_leverage(unknown, dec!(3)).await;
+    assert!(unknown.unwrap_err().to_string().contains("no symbol"));
+    assert_eq!(h.venue.state.lock().posts.len(), 4);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_follow_the_pages() {
+    let (h, _) = Harness::connect().await;
+    {
+        // 1,001 open orders and 2,003 trades: two and three pages of 1,000.
+        let mut state = h.venue.state.lock();
+        let open = |number| row(&format!("order-{number}"), "", "ACK")["order_response"].clone();
+        state.open_orders = (0..1001).map(open).collect();
+        state.trade_rows = 2003;
+    }
+    let ts = UnixNanos::default();
+
+    let cmd = GenerateOrderStatusReports::new(UUID4::new(), ts, true, None, None, None, None, None);
+    let reports = h.client.generate_order_status_reports(&cmd).await.unwrap();
+    assert_eq!(reports.len(), 1001);
+    assert_eq!(
+        h.venue.frames("get_user_orders"),
+        [
+            json!({"limit": 1000, "offset": 0}),
+            json!({"limit": 1000, "offset": 1000})
+        ]
+    );
+
+    let cmd = GenerateFillReports::new(UUID4::new(), ts, None, None, None, None, None, None);
+    let fills = h.client.generate_fill_reports(cmd).await.unwrap();
+    assert_eq!(fills.len(), 2003);
+    assert_eq!(fills[2002].trade_id.to_string(), "T-2002");
+    let pages = h.venue.gets("/user/trade");
+    let offsets: Vec<_> = pages.iter().map(|page| page.contains("offset=")).collect();
+    assert_eq!(offsets, [false, true, true], "{pages:?}");
+    assert!(pages[2].contains("offset=2000"), "{pages:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,7 +1,10 @@
 //! Python bindings of the client configurations.
 
-use nautilus_model::identifiers::AccountId;
+use std::collections::HashMap;
+
+use nautilus_model::identifiers::{AccountId, InstrumentId};
 use pyo3::pymethods;
+use rust_decimal::Decimal;
 
 use crate::{
     common::enums::QfexEnvironment,
@@ -78,6 +81,7 @@ impl QfexExecClientConfig {
         api_key = None,
         api_secret = None,
         cancel_on_disconnect = None,
+        leverages = None,
     ))]
     #[expect(clippy::too_many_arguments)]
     fn py_new(
@@ -91,6 +95,7 @@ impl QfexExecClientConfig {
         api_key: Option<String>,
         api_secret: Option<String>,
         cancel_on_disconnect: Option<bool>,
+        leverages: Option<HashMap<InstrumentId, Decimal>>,
     ) -> Self {
         let defaults = Self::default();
         Self {
@@ -104,6 +109,7 @@ impl QfexExecClientConfig {
             api_key,
             api_secret,
             cancel_on_disconnect: cancel_on_disconnect.unwrap_or(defaults.cancel_on_disconnect),
+            leverages: leverages.unwrap_or_default(),
         }
     }
 
@@ -120,6 +126,11 @@ impl QfexExecClientConfig {
     #[getter]
     fn cancel_on_disconnect(&self) -> bool {
         self.cancel_on_disconnect
+    }
+
+    #[getter]
+    fn leverages(&self) -> HashMap<InstrumentId, Decimal> {
+        self.leverages.clone()
     }
 
     // No getter for `api_key` and `api_secret`; `__repr__` redacts them.
