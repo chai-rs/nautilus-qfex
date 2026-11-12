@@ -259,8 +259,8 @@ pub fn auth(key: &str, secret: &str, nonce: &str, unix_ts: u64) {
 ///
 /// # Panics
 ///
-/// Panics if a frame is not JSON, or a value of up to 15 significant digits (every real
-/// price and size) does not read back as the same number.
+/// Panics if a frame is not JSON, or a value of up to 15 significant digits and 22 decimals
+/// (every real price and size) does not read back as the same number.
 pub fn wire_format(quantity: Decimal, price: Decimal) {
     let symbol = Ustr::from("AAPL-USD");
     let add = QfexTradeRequest::AddOrder(QfexAddOrder {
@@ -286,7 +286,9 @@ pub fn wire_format(quantity: Decimal, price: Decimal) {
         let text = request.to_frame();
         let frame: Value = serde_json::from_str(&text).expect("request frame is JSON");
         for (name, value) in [("quantity", quantity), ("price", price)] {
-            if value.mantissa().unsigned_abs() >= 1_000_000_000_000_000 {
+            // The wire number is an f64. `Decimal::to_f64` divides by 10^scale, and an f64
+            // holds a power of ten exactly up to 10^22 only.
+            if value.mantissa().unsigned_abs() >= 1_000_000_000_000_000 || value.scale() > 22 {
                 continue;
             }
             let sent = frame["params"][name].to_string();
@@ -502,5 +504,14 @@ mod tests {
             wire_format(rng.decimal(), rng.decimal());
         }
         wire_format(Decimal::MAX, Decimal::MIN);
+    }
+
+    /// The input of the first crash that the CI fuzz job found (12 Nov 2026).
+    #[rstest]
+    fn test_wire_format_survives_25_decimals() {
+        wire_format(
+            decimal((2_307_590_656, 58_753, 0, true, 112)),
+            decimal((0, 28_160, 0, true, 45)),
+        );
     }
 }
