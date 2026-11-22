@@ -4,16 +4,22 @@
 //! reconnect. Trade: sends the HMAC `auth` frame after every connect and reconnect and, once the
 //! venue answers `success`, the session frames (channel subscriptions, cancel on disconnect).
 
-use std::{collections::BTreeSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nautilus_common::live::get_runtime;
 use nautilus_network::{
     RECONNECTED,
     websocket::{WebSocketClient, WebSocketConfig, channel_message_handler},
 };
+use serde_json::Value;
 use strum::IntoEnumIterator;
 use tokio::{
-    sync::{Mutex, mpsc},
+    sync::{Mutex, Notify, mpsc},
     task::JoinHandle,
 };
 use tokio_tungstenite::tungstenite::Message;
@@ -35,6 +41,17 @@ const RECONNECT_DELAY_MAX_MS: u64 = 30_000;
 const RECONNECT_BACKOFF_FACTOR: f64 = 2.0;
 const RECONNECT_JITTER_MS: u64 = 200;
 
+/// How many market data subscribe frames may await a venue acknowledgement at once. QFEX
+/// publishes no quota, so the gate bounds the burst in frames instead of guessing a rate.
+const SUBSCRIBE_INFLIGHT_MAX: usize = 4;
+/// Registrations that arrive inside this window leave as one frame a channel.
+const SUBSCRIBE_DEBOUNCE_MS: u64 = 50;
+/// A subscribe frame the venue never answered is sent again after this long.
+const SUBSCRIBE_ACK_TIMEOUT_MS: u64 = 10_000;
+/// First wait before a refused subscribe is sent again, and the ceiling it doubles up to.
+const SUBSCRIBE_RETRY_INITIAL_MS: u64 = 250;
+const SUBSCRIBE_RETRY_MAX_MS: u64 = 30_000;
+
 type Subscriptions = Arc<Mutex<BTreeSet<(QfexMdsChannel, Ustr)>>>;
 
 /// What is sent again on every (re)connection.
@@ -46,6 +63,280 @@ struct Session {
     frames: Arc<Vec<String>>,
     /// Market data socket.
     subscriptions: Subscriptions,
+    /// Market data socket: paces the live subscribe path.
+    gate: Arc<SubscribeGate>,
+}
+
+/// One outgoing market data frame: one channel and every symbol of it.
+struct Frame {
+    subscribe: bool,
+    channel: QfexMdsChannel,
+    symbols: Vec<Ustr>,
+}
+
+impl Frame {
+    fn request(&self) -> QfexMdsRequest<'_> {
+        let channels = std::slice::from_ref(&self.channel);
+        let symbols = self.symbols.as_slice();
+        if self.subscribe {
+            QfexMdsRequest::Subscribe { channels, symbols }
+        } else {
+            QfexMdsRequest::Unsubscribe { channels, symbols }
+        }
+    }
+}
+
+/// Registrations waiting to go out, and the frames the venue has not answered yet.
+struct GateState {
+    subscribe: BTreeSet<(QfexMdsChannel, Ustr)>,
+    unsubscribe: BTreeSet<(QfexMdsChannel, Ustr)>,
+    /// One entry a channel: when the frame went out and what it held, so a refused or
+    /// unanswered frame can be queued again.
+    inflight: BTreeMap<QfexMdsChannel, (Instant, Vec<Ustr>)>,
+    /// Earliest the next subscribe may go out; set after the venue refuses one.
+    hold_until: Option<Instant>,
+    retry_ms: u64,
+}
+
+impl Default for GateState {
+    fn default() -> Self {
+        Self {
+            subscribe: BTreeSet::new(),
+            unsubscribe: BTreeSet::new(),
+            inflight: BTreeMap::new(),
+            hold_until: None,
+            retry_ms: SUBSCRIBE_RETRY_INITIAL_MS,
+        }
+    }
+}
+
+impl GateState {
+    /// Whether a subscribe frame may go out: budget left, and a channel with none in flight.
+    fn sendable(&self) -> bool {
+        self.inflight.len() < SUBSCRIBE_INFLIGHT_MAX
+            && self
+                .subscribe
+                .iter()
+                .any(|(channel, _)| !self.inflight.contains_key(channel))
+    }
+
+    /// Queues the subscriptions of frames the venue never answered.
+    fn expire(&mut self, now: Instant) {
+        let timeout = Duration::from_millis(SUBSCRIBE_ACK_TIMEOUT_MS);
+        let stale: Vec<QfexMdsChannel> = self
+            .inflight
+            .iter()
+            .filter(|(_, (sent, _))| now.duration_since(*sent) >= timeout)
+            .map(|(channel, _)| *channel)
+            .collect();
+        for channel in stale {
+            if let Some((_, symbols)) = self.inflight.remove(&channel) {
+                self.subscribe
+                    .extend(symbols.into_iter().map(|symbol| (channel, symbol)));
+            }
+        }
+    }
+
+    /// How long the pump waits before it flushes again. `None` means nothing is owed.
+    fn next_wait(&self, now: Instant) -> Option<Duration> {
+        if !self.unsubscribe.is_empty() {
+            return Some(Duration::ZERO);
+        }
+        if self.sendable() {
+            return match self.hold_until {
+                Some(hold) if hold > now => Some(hold - now),
+                _ => Some(Duration::ZERO),
+            };
+        }
+        // Capped: wake when the oldest unanswered frame times out.
+        self.inflight
+            .values()
+            .map(|(sent, _)| *sent)
+            .min()
+            .map(|sent| {
+                (sent + Duration::from_millis(SUBSCRIBE_ACK_TIMEOUT_MS))
+                    .saturating_duration_since(now)
+            })
+    }
+
+    /// The frames to send now: the drops, then one subscribe frame a channel up to the budget.
+    fn take_frames(&mut self, now: Instant) -> Vec<Frame> {
+        let mut frames: Vec<Frame> = group(std::mem::take(&mut self.unsubscribe))
+            .into_iter()
+            .map(|(channel, symbols)| Frame {
+                subscribe: false,
+                channel,
+                symbols,
+            })
+            .collect();
+        if self.hold_until.is_some_and(|hold| hold > now) {
+            return frames;
+        }
+        self.hold_until = None;
+        while self.sendable() {
+            let Some(channel) = self
+                .subscribe
+                .iter()
+                .map(|(channel, _)| *channel)
+                .find(|channel| !self.inflight.contains_key(channel))
+            else {
+                break;
+            };
+            let symbols: Vec<Ustr> = self
+                .subscribe
+                .iter()
+                .filter(|(c, _)| *c == channel)
+                .map(|(_, symbol)| *symbol)
+                .collect();
+            self.subscribe.retain(|(c, _)| *c != channel);
+            self.inflight.insert(channel, (now, symbols.clone()));
+            frames.push(Frame {
+                subscribe: true,
+                channel,
+                symbols,
+            });
+        }
+        frames
+    }
+
+    fn hold_off(&mut self) {
+        self.hold_until = Some(Instant::now() + Duration::from_millis(self.retry_ms));
+        self.retry_ms = self.retry_ms.saturating_mul(2).min(SUBSCRIBE_RETRY_MAX_MS);
+    }
+}
+
+/// `(channel, symbol)` pairs as one group a channel. The set is ordered by channel first, so
+/// one pass is enough.
+fn group(pairs: BTreeSet<(QfexMdsChannel, Ustr)>) -> Vec<(QfexMdsChannel, Vec<Ustr>)> {
+    let mut groups: Vec<(QfexMdsChannel, Vec<Ustr>)> = Vec::new();
+    for (channel, symbol) in pairs {
+        match groups.last_mut() {
+            Some((last, symbols)) if *last == channel => symbols.push(symbol),
+            _ => groups.push((channel, vec![symbol])),
+        }
+    }
+    groups
+}
+
+/// Paces the live market data subscribe path: registrations are collected and leave as one
+/// frame a channel, the shape `start_session` already sends on every (re)connection.
+#[derive(Default)]
+struct SubscribeGate {
+    state: Mutex<GateState>,
+    wake: Notify,
+}
+
+impl SubscribeGate {
+    /// Records one registration. `subscribe` false queues a drop.
+    async fn queue(&self, subscribe: bool, channel: QfexMdsChannel, symbol: Ustr) {
+        let pair = (channel, symbol);
+        let mut state = self.state.lock().await;
+        if subscribe {
+            // A drop not sent yet cancels out: the venue subscription stays as it is.
+            if !state.unsubscribe.remove(&pair) {
+                state.subscribe.insert(pair);
+            }
+        } else {
+            let sent = state
+                .inflight
+                .get(&channel)
+                .is_some_and(|(_, symbols)| symbols.contains(&symbol));
+            // Nothing to drop at the venue if the subscribe never went out.
+            if !state.subscribe.remove(&pair) || sent {
+                state.unsubscribe.insert(pair);
+            }
+        }
+        drop(state);
+        self.wake.notify_one();
+    }
+
+    /// The venue answered one frame.
+    async fn acknowledged(&self) {
+        let mut state = self.state.lock().await;
+        // The acknowledgement carries no identity the adapter kept, so the oldest unanswered
+        // frame is the one released. An `unsubscribed` ack releases one too, which only
+        // loosens the cap by the drops in flight.
+        let oldest = state
+            .inflight
+            .iter()
+            .min_by_key(|(_, (sent, _))| *sent)
+            .map(|(channel, _)| *channel);
+        if let Some(channel) = oldest {
+            state.inflight.remove(&channel);
+            state.retry_ms = SUBSCRIBE_RETRY_INITIAL_MS;
+        }
+        drop(state);
+        self.wake.notify_one();
+    }
+
+    /// The venue refused a frame: queue what it held again, after a backoff.
+    async fn refused(&self, incoming: &Value) {
+        if incoming.get("type").and_then(Value::as_str) != Some("subscribe") {
+            return;
+        }
+        let Some(channels) = incoming.get("channels").and_then(Value::as_array) else {
+            return;
+        };
+        let mut state = self.state.lock().await;
+        let mut queued = false;
+        for channel in channels {
+            let Ok(channel) = serde_json::from_value::<QfexMdsChannel>(channel.clone()) else {
+                continue;
+            };
+            if let Some((_, symbols)) = state.inflight.remove(&channel) {
+                state
+                    .subscribe
+                    .extend(symbols.into_iter().map(|symbol| (channel, symbol)));
+                queued = true;
+            }
+        }
+        if queued {
+            state.hold_off();
+        }
+        drop(state);
+        self.wake.notify_one();
+    }
+
+    /// The connection went: `start_session` sends every recorded subscription again, and no
+    /// acknowledgement from the old connection is coming. What is queued stays queued, because
+    /// a repeated subscribe is harmless and a registration may have arrived mid-reconnect.
+    async fn connection_lost(&self) {
+        let mut state = self.state.lock().await;
+        state.inflight.clear();
+        state.hold_until = None;
+        state.retry_ms = SUBSCRIBE_RETRY_INITIAL_MS;
+        drop(state);
+        self.wake.notify_one();
+    }
+}
+
+/// Sends the market data frames of a live connection: one frame a channel, and at most
+/// `SUBSCRIBE_INFLIGHT_MAX` subscribes awaiting an acknowledgement.
+async fn subscribe_pump(client: Arc<WebSocketClient>, gate: Arc<SubscribeGate>) {
+    loop {
+        let wait = {
+            let mut state = gate.state.lock().await;
+            let now = Instant::now();
+            state.expire(now);
+            state.next_wait(now)
+        };
+        match wait {
+            None => gate.wake.notified().await,
+            // An acknowledgement or a new registration cuts the wait short.
+            Some(wait) if !wait.is_zero() => {
+                let _ = tokio::time::timeout(wait, gate.wake.notified()).await;
+            }
+            Some(_) => {}
+        }
+        // Collect the registrations of one breath, so many symbols leave as one frame.
+        tokio::time::sleep(Duration::from_millis(SUBSCRIBE_DEBOUNCE_MS)).await;
+        let frames = gate.state.lock().await.take_frames(Instant::now());
+        for frame in frames {
+            if let Err(e) = send_json(&client, &frame.request()).await {
+                log::warn!("QFEX WebSocket: subscription frame not sent: {e}");
+            }
+        }
+    }
 }
 
 /// A QFEX WebSocket connection that reconnects on its own.
@@ -54,6 +345,7 @@ pub struct QfexWebSocketClient {
     session: Session,
     client: Option<Arc<WebSocketClient>>,
     task: Option<JoinHandle<()>>,
+    pump: Option<JoinHandle<()>>,
 }
 
 impl Debug for QfexWebSocketClient {
@@ -76,9 +368,11 @@ impl QfexWebSocketClient {
                 signer: None,
                 frames: Arc::default(),
                 subscriptions: Arc::default(),
+                gate: Arc::default(),
             },
             client: None,
             task: None,
+            pump: None,
         }
     }
 
@@ -118,9 +412,11 @@ impl QfexWebSocketClient {
                 signer: Some(signer),
                 frames: Arc::new(frames),
                 subscriptions: Arc::default(),
+                gate: Arc::default(),
             },
             client: None,
             task: None,
+            pump: None,
         })
     }
 
@@ -159,13 +455,18 @@ impl QfexWebSocketClient {
         }
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         self.client = Some(client.clone());
+        if self.session.signer.is_none() {
+            self.pump = Some(
+                get_runtime().spawn(subscribe_pump(client.clone(), self.session.gate.clone())),
+            );
+        }
         self.task =
             Some(get_runtime().spawn(read_loop(raw_rx, out_tx, client, self.session.clone())));
 
         Ok(out_rx)
     }
 
-    /// Closes the connection and stops the read task.
+    /// Closes the connection and stops the read and subscribe tasks.
     pub async fn disconnect(&mut self) {
         if let Some(client) = self.client.take() {
             client.disconnect().await;
@@ -173,6 +474,10 @@ impl QfexWebSocketClient {
         if let Some(task) = self.task.take() {
             task.abort();
         }
+        if let Some(pump) = self.pump.take() {
+            pump.abort();
+        }
+        self.session.gate.connection_lost().await;
     }
 
     /// Whether the connection is up.
@@ -183,9 +488,12 @@ impl QfexWebSocketClient {
 
     /// Subscribes one market data channel for one symbol. Before `connect` it is only recorded.
     ///
+    /// While connected the registration is handed to the subscribe gate, which sends one frame
+    /// a channel shortly after. A send failure is logged there, not returned here.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the frame cannot be sent.
+    /// Never fails today; the result is kept for callers.
     pub async fn subscribe(
         &self,
         channel: QfexMdsChannel,
@@ -195,23 +503,19 @@ impl QfexWebSocketClient {
         if !subscriptions.insert((channel, symbol)) {
             return Ok(());
         }
-        match &self.client {
-            Some(client) => {
-                let request = QfexMdsRequest::Subscribe {
-                    channels: &[channel],
-                    symbols: &[symbol],
-                };
-                send_json(client, &request).await
-            }
-            None => Ok(()),
+        drop(subscriptions);
+        if self.client.is_some() {
+            self.session.gate.queue(true, channel, symbol).await;
         }
+        Ok(())
     }
 
-    /// Unsubscribes one market data channel for one symbol.
+    /// Unsubscribes one market data channel for one symbol. Dropping some symbols of a channel
+    /// leaves the rest subscribed: the frame carries the dropped symbols only.
     ///
     /// # Errors
     ///
-    /// Returns an error if the frame cannot be sent.
+    /// Never fails today; the result is kept for callers.
     pub async fn unsubscribe(
         &self,
         channel: QfexMdsChannel,
@@ -221,16 +525,11 @@ impl QfexWebSocketClient {
         if !subscriptions.remove(&(channel, symbol)) {
             return Ok(());
         }
-        match &self.client {
-            Some(client) => {
-                let request = QfexMdsRequest::Unsubscribe {
-                    channels: &[channel],
-                    symbols: &[symbol],
-                };
-                send_json(client, &request).await
-            }
-            None => Ok(()),
+        drop(subscriptions);
+        if self.client.is_some() {
+            self.session.gate.queue(false, channel, symbol).await;
         }
+        Ok(())
     }
 
     /// Sends one request on the trade socket.
@@ -303,6 +602,7 @@ async fn read_loop(
         };
 
         if text.as_str() == RECONNECTED {
+            session.gate.connection_lost().await;
             if out_tx.send(QfexWsMessage::Reconnected).is_err() {
                 return;
             }
@@ -320,12 +620,17 @@ async fn read_loop(
             }
         };
 
-        if matches!(message, QfexWsMessage::Authenticated) {
-            for frame in session.frames.iter() {
-                if let Err(e) = client.send_text(frame.clone(), None).await {
-                    log::warn!("QFEX WebSocket: session frame not sent: {e}");
+        match &message {
+            QfexWsMessage::Authenticated => {
+                for frame in session.frames.iter() {
+                    if let Err(e) = client.send_text(frame.clone(), None).await {
+                        log::warn!("QFEX WebSocket: session frame not sent: {e}");
+                    }
                 }
             }
+            QfexWsMessage::Subscribed => session.gate.acknowledged().await,
+            QfexWsMessage::Error(error) => session.gate.refused(&error.incoming_message).await,
+            _ => {}
         }
         if out_tx.send(message).is_err() {
             return;
@@ -335,10 +640,7 @@ async fn read_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::atomic::{AtomicUsize, Ordering},
-        time::Duration,
-    };
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use axum::{
         Router,
@@ -369,6 +671,11 @@ mod tests {
         queries: Arc<parking_lot::Mutex<Vec<String>>>,
         pongs: Arc<parking_lot::Mutex<Vec<Vec<u8>>>>,
         drop_connection: Arc<Notify>,
+        /// While set, subscribe replies are kept back until `release_acks`.
+        hold_acks: Arc<AtomicBool>,
+        release_acks: Arc<Notify>,
+        /// Channel name to refuse once, with the frame echoed in `incoming_message`.
+        refuse: Arc<parking_lot::Mutex<Option<String>>>,
     }
 
     impl MockVenue {
@@ -409,9 +716,16 @@ mod tests {
                 .into_iter()
                 .find(|line| line.contains(r#""type":"bbo""#))
                 .unwrap();
+            let mut deferred: Vec<String> = Vec::new();
             loop {
                 let message = tokio::select! {
                     () = self.drop_connection.notified() => return,
+                    () = self.release_acks.notified() => {
+                        for reply in deferred.drain(..) {
+                            socket.send(WsMessage::Text(reply.into())).await.unwrap();
+                        }
+                        continue;
+                    }
                     message = socket.recv() => message,
                 };
                 match message {
@@ -421,8 +735,21 @@ mod tests {
                         let replies = if frame["type"] == "auth" {
                             vec![json!({"type": "auth", "result": "success"}).to_string()]
                         } else if frame["type"] == "subscribe" && frame["params"].is_null() {
-                            let ack = json!({"type": "subscribed", "channels": frame["channels"], "symbols": frame["symbols"]});
-                            vec![ack.to_string(), bbo.clone()]
+                            if self.refuse_now(&frame) {
+                                vec![
+                                    json!({"type": "error", "message": "refused", "incoming_message": frame})
+                                        .to_string(),
+                                ]
+                            } else {
+                                let ack = json!({"type": "subscribed", "channels": frame["channels"], "symbols": frame["symbols"]});
+                                let acks = vec![ack.to_string(), bbo.clone()];
+                                if self.hold_acks.load(Ordering::SeqCst) {
+                                    deferred.extend(acks);
+                                    vec![]
+                                } else {
+                                    acks
+                                }
+                            }
                         } else {
                             vec![]
                         };
@@ -435,6 +762,21 @@ mod tests {
                     _ => return,
                 }
             }
+        }
+
+        /// Whether this subscribe frame is the one to refuse. The refusal is spent on reading.
+        fn refuse_now(&self, frame: &Value) -> bool {
+            let mut refuse = self.refuse.lock();
+            let Some(name) = refuse.clone() else {
+                return false;
+            };
+            let hit = frame["channels"]
+                .as_array()
+                .is_some_and(|channels| channels.iter().any(|c| c.as_str() == Some(&name)));
+            if hit {
+                *refuse = None;
+            }
+            hit
         }
 
         fn requests(&self, connection: usize) -> Vec<Value> {
@@ -466,6 +808,100 @@ mod tests {
 
     fn aapl() -> Ustr {
         Ustr::from("AAPL-USD")
+    }
+
+    /// Every market data channel the adapter subscribes.
+    const MDS_CHANNELS: [QfexMdsChannel; 6] = [
+        QfexMdsChannel::Level2,
+        QfexMdsChannel::Bbo,
+        QfexMdsChannel::Trade,
+        QfexMdsChannel::MarkPrice,
+        QfexMdsChannel::Underlier,
+        QfexMdsChannel::Funding,
+    ];
+
+    #[tokio::test]
+    async fn mds_subscribe_batches_every_symbol_of_a_channel_into_one_frame() {
+        let (venue, url) = MockVenue::start().await;
+        let mut client = QfexWebSocketClient::new_mds(url);
+        let _rx = client.connect().await.unwrap();
+
+        let symbols: Vec<Ustr> = (0..32)
+            .map(|i| Ustr::from(&format!("SYM{i:02}-USD")))
+            .collect();
+        for channel in MDS_CHANNELS {
+            for symbol in &symbols {
+                client.subscribe(channel, *symbol).await.unwrap();
+            }
+        }
+
+        wait_until("one frame a channel", || {
+            venue.requests(1).len() >= MDS_CHANNELS.len()
+        })
+        .await;
+        let requests = venue.requests(1);
+        assert_eq!(
+            requests.len(),
+            MDS_CHANNELS.len(),
+            "192 registrations leave as one frame a channel"
+        );
+        for request in &requests {
+            assert_eq!(request["type"], "subscribe");
+            assert_eq!(request["channels"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                request["symbols"].as_array().unwrap().len(),
+                symbols.len(),
+                "every symbol of the channel in one frame"
+            );
+        }
+        client.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn mds_subscribe_gate_holds_frames_past_the_inflight_cap() {
+        let (venue, url) = MockVenue::start().await;
+        venue.hold_acks.store(true, Ordering::SeqCst);
+        let mut client = QfexWebSocketClient::new_mds(url);
+        let _rx = client.connect().await.unwrap();
+
+        assert!(MDS_CHANNELS.len() > SUBSCRIBE_INFLIGHT_MAX);
+        for channel in MDS_CHANNELS {
+            client.subscribe(channel, aapl()).await.unwrap();
+        }
+        wait_until("the first frames", || {
+            venue.requests(1).len() >= SUBSCRIBE_INFLIGHT_MAX
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(5 * SUBSCRIBE_DEBOUNCE_MS)).await;
+        assert_eq!(
+            venue.requests(1).len(),
+            SUBSCRIBE_INFLIGHT_MAX,
+            "the rest wait for an acknowledgement"
+        );
+
+        venue.hold_acks.store(false, Ordering::SeqCst);
+        venue.release_acks.notify_one();
+        wait_until("the rest", || venue.requests(1).len() == MDS_CHANNELS.len()).await;
+        client.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn mds_subscribe_refused_by_the_venue_is_sent_again() {
+        let (venue, url) = MockVenue::start().await;
+        *venue.refuse.lock() = Some("level2".to_string());
+        let mut client = QfexWebSocketClient::new_mds(url);
+        let mut rx = client.connect().await.unwrap();
+
+        client
+            .subscribe(QfexMdsChannel::Level2, aapl())
+            .await
+            .unwrap();
+        wait_until("the retry", || venue.requests(1).len() == 2).await;
+        let frame = json!({"type": "subscribe", "channels": ["level2"], "symbols": ["AAPL-USD"]});
+        assert_eq!(venue.requests(1), [frame.clone(), frame]);
+        assert!(matches!(next(&mut rx).await, QfexWsMessage::Error(_)));
+        assert!(matches!(next(&mut rx).await, QfexWsMessage::Subscribed));
+        client.disconnect().await;
     }
 
     #[tokio::test]
