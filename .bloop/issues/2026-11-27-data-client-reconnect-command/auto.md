@@ -1,5 +1,5 @@
-WAITING: is restate.md right? It chooses to register a reconnect handler for market_data (a reconnect command answers Accepted and reconnects the socket) instead of answering Unsupported again. 1) yes 2) no, with what is wrong
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -21,3 +21,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
 
 - 2026-11-27T13:47Z · waiting · restate chose between two fixes the issue left open; the person was told earlier they would make that choice, so it is not answered by trust level
+- 2026-11-27T14:25Z · user · person answered "1" (yes, register a reconnect handler); restate confirmed

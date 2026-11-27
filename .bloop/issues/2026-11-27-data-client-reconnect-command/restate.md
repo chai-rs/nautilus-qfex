@@ -1,4 +1,4 @@
-CONFIRMED: no
+CONFIRMED: yes
 
 # Controller can reconnect the market data socket
 
