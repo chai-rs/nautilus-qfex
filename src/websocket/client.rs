@@ -13,7 +13,7 @@ use std::{
 
 use nautilus_common::live::get_runtime;
 use nautilus_network::{
-    RECONNECTED,
+    RECONNECTED, SocketStateSink,
     websocket::{WebSocketClient, WebSocketConfig, channel_message_handler},
 };
 use serde_json::Value;
@@ -346,6 +346,7 @@ pub struct QfexWebSocketClient {
     client: Option<Arc<WebSocketClient>>,
     task: Option<JoinHandle<()>>,
     pump: Option<JoinHandle<()>>,
+    state_sink: Option<SocketStateSink>,
 }
 
 impl Debug for QfexWebSocketClient {
@@ -373,7 +374,15 @@ impl QfexWebSocketClient {
             client: None,
             task: None,
             pump: None,
+            state_sink: None,
         }
+    }
+
+    /// Reports `Connected` and `Disconnected` of every connection this client makes to `sink`.
+    #[must_use]
+    pub fn with_state_sink(mut self, sink: SocketStateSink) -> Self {
+        self.state_sink = Some(sink);
+        self
     }
 
     /// A trade client: authenticates, subscribes to the four private channels and, when asked,
@@ -417,6 +426,7 @@ impl QfexWebSocketClient {
             client: None,
             task: None,
             pump: None,
+            state_sink: None,
         })
     }
 
@@ -443,6 +453,7 @@ impl QfexWebSocketClient {
         let client = WebSocketClient::builder()
             .config(config)
             .message_handler(handler)
+            .maybe_state_sink(self.state_sink.clone())
             .connect()
             .await
             .map_err(|e| QfexWsClientError::Network(e.to_string()))?;
@@ -651,6 +662,7 @@ mod tests {
         response::Response,
         routing::get,
     };
+    use nautilus_network::{SocketState, SocketStateSink};
     use serde_json::{Value, json};
     use tokio::sync::Notify;
 
@@ -819,6 +831,32 @@ mod tests {
         QfexMdsChannel::Underlier,
         QfexMdsChannel::Funding,
     ];
+
+    #[tokio::test]
+    async fn mds_state_sink_sees_connect_loss_and_reconnect() {
+        let (venue, url) = MockVenue::start().await;
+        let states = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let seen = states.clone();
+        let mut client = QfexWebSocketClient::new_mds(url)
+            .with_state_sink(SocketStateSink::new(move |state| seen.lock().push(state)));
+        let _rx = client.connect().await.unwrap();
+        wait_until("connected", || states.lock().len() == 1).await;
+
+        venue.drop_connection.notify_one();
+        wait_until("reconnected", || states.lock().len() == 3).await;
+        client.disconnect().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert_eq!(
+            *states.lock(),
+            vec![
+                SocketState::Connected,
+                SocketState::Disconnected,
+                SocketState::Connected,
+            ],
+            "a deliberate disconnect reports nothing"
+        );
+    }
 
     #[tokio::test]
     async fn mds_subscribe_batches_every_symbol_of_a_channel_into_one_frame() {
