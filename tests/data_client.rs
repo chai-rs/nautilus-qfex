@@ -17,21 +17,22 @@ use axum::{
 };
 use nautilus_common::{
     clients::DataClient,
-    live::runner::replace_data_event_sender,
+    live::runner::{replace_data_event_sender, replace_system_event_sender},
     messages::{
-        DataEvent,
+        DataEvent, SystemEvent,
         data::{
             DataResponse, RequestBars, RequestBookSnapshot, SubscribeBookDeltas,
             SubscribeBookDepth, SubscribeInstrumentStatus, SubscribeMarkPrices, SubscribeQuotes,
             SubscribeTrades, UnsubscribeQuotes,
         },
+        system::SocketState,
     },
 };
 use nautilus_core::{UUID4, UnixNanos};
 use nautilus_model::{
     data::{BarType, Data},
     enums::{AggressorSide, BookAction, BookType, MarketStatusAction},
-    identifiers::{ClientId, InstrumentId},
+    identifiers::{ClientId, InstrumentId, Venue as VenueId},
     types::Price,
 };
 use nautilus_qfex::{config::data::QfexDataClientConfig, data::QfexDataClient};
@@ -456,4 +457,61 @@ async fn instrument_status_comes_from_refdata() {
     assert_eq!(status.action, MarketStatusAction::Suspend);
     assert_eq!(status.is_trading, Some(false));
     assert!(events.try_recv().is_err());
+}
+
+/// The next socket state of the data client, checked to come from its market data socket.
+async fn next_state(
+    system: &mut UnboundedReceiver<SystemEvent>,
+    client_id: ClientId,
+) -> SocketState {
+    let event = tokio::time::timeout(Duration::from_secs(10), system.recv())
+        .await
+        .expect("no socket state within 10 s")
+        .expect("system event channel closed");
+    let SystemEvent::SocketState(change) = event;
+    assert_eq!(change.client_id, client_id);
+    assert_eq!(change.venue, Some(VenueId::from("QFEX")));
+    assert_eq!(change.endpoint.as_str(), "market_data");
+    change.state
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn socket_state_follows_the_market_data_socket() {
+    let (config, venue) = start_venue().await;
+    let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+    replace_data_event_sender(sender);
+    // The control reads the system event sender when the client is built.
+    let (sender, mut system) = tokio::sync::mpsc::unbounded_channel();
+    replace_system_event_sender(sender);
+    let client_id = ClientId::from("QFEX-DATA");
+    let mut client = QfexDataClient::new(client_id, config).unwrap();
+
+    client.connect().await.unwrap();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+
+    venue.drop_connection.notify_one();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Disconnected
+    );
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+
+    // A deliberate disconnect is not a loss.
+    client.disconnect().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(system.try_recv().is_err(), "disconnect reported a state");
+
+    // `close()` built a new socket: it still reports.
+    client.connect().await.unwrap();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+    client.disconnect().await.unwrap();
 }

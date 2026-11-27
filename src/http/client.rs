@@ -335,7 +335,7 @@ impl QfexHttpClient {
             .map_err(|e| QfexHttpError::InvalidRequest(e.to_string()))?;
         let ts_init = get_atomic_clock_realtime().get_time_ns();
         let (start, end) = history_range(start, end, limit, interval.as_nanos(), ts_init);
-        // shortcut: one request per call (the docs give no cap on candles per response);
+        // shortcut: one request per call (the docs give no cap on candles per response),
         // page backwards from `end` if a long range ever comes back short.
         let candles = self
             .get_candles(venue_symbol_of(&instrument.id())?, interval, start, end)
