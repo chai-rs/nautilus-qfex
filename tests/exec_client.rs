@@ -25,18 +25,19 @@ use axum::{
 use nautilus_common::{
     cache::Cache,
     clients::ExecutionClient,
-    live::runner::replace_exec_event_sender,
+    live::runner::{replace_exec_event_sender, replace_system_event_sender},
     messages::{
-        ExecutionEvent, ExecutionReport,
+        ExecutionEvent, ExecutionReport, SystemEvent,
         execution::{
             CancelAllOrders, CancelOrder, GenerateFillReports, GenerateOrderStatusReport,
             GenerateOrderStatusReports, GeneratePositionStatusReports, ModifyOrder, SubmitOrder,
         },
+        system::SocketState,
     },
 };
 use nautilus_core::{UUID4, UnixNanos};
 use nautilus_cryptography::signing::hmac_signature;
-use nautilus_live::ExecutionClientCore;
+use nautilus_live::{ExecutionClientCore, SocketReconnectLookup, SocketReconnectRegistry};
 use nautilus_model::{
     enums::{AccountType, LiquiditySide, OmsType, OrderSide, OrderStatus, OrderType},
     events::{AccountState, OrderEventAny},
@@ -384,6 +385,14 @@ impl Harness {
     async fn start(
         configure: impl FnOnce(&mut QfexExecClientConfig, &Venue),
     ) -> (Self, anyhow::Result<()>) {
+        Self::start_in(&SocketReconnectRegistry::default(), configure).await
+    }
+
+    /// As [`Self::start`], with the client built inside `registry`'s scope, as a `LiveNode` does.
+    async fn start_in(
+        registry: &SocketReconnectRegistry,
+        configure: impl FnOnce(&mut QfexExecClientConfig, &Venue),
+    ) -> (Self, anyhow::Result<()>) {
         let (venue, http_url, ws_url) = Venue::start().await;
         // Credentials come from the config here, never from the environment.
         let mut config = QfexExecClientConfig {
@@ -408,7 +417,9 @@ impl Harness {
             None,
             cache.clone(),
         );
-        let mut client = QfexExecutionClient::new(core, config).unwrap();
+        let mut client = registry
+            .scope(|| QfexExecutionClient::new(core, config))
+            .unwrap();
         client.start().unwrap();
         let connected = client.connect().await;
         let harness = Self {
@@ -970,4 +981,60 @@ async fn reconnect_logs_in_again_and_catches_up() {
         h.next_order_event().await,
         OrderEventAny::Canceled(_)
     ));
+}
+
+/// The next socket state of the execution client, checked to come from its trade socket.
+async fn next_state(system: &mut UnboundedReceiver<SystemEvent>) -> SocketState {
+    let event = tokio::time::timeout(Duration::from_secs(10), system.recv())
+        .await
+        .expect("no socket state within 10 s")
+        .expect("system event channel closed");
+    let SystemEvent::SocketState(change) = event;
+    assert_eq!(change.client_id, client_id());
+    assert_eq!(change.venue, Some(*QFEX_VENUE));
+    assert_eq!(change.endpoint.as_str(), "trade");
+    change.state
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn socket_state_follows_the_trade_socket() {
+    // The control reads the system event sender when the client first connects.
+    let (sender, mut system) = tokio::sync::mpsc::unbounded_channel();
+    replace_system_event_sender(sender);
+    let registry = SocketReconnectRegistry::default();
+    let (mut h, connected) = Harness::start_in(&registry, |_, _| {}).await;
+    connected.unwrap();
+    assert_eq!(next_state(&mut system).await, SocketState::Connected);
+
+    // `notify_waiters` is lost while the stand-in is busy answering, so drop until it lands.
+    let lost = loop {
+        h.venue.drop_connection.notify_waiters();
+        if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), system.recv()).await {
+            break event.expect("system event channel closed");
+        }
+    };
+    let SystemEvent::SocketState(lost) = lost;
+    assert_eq!(lost.state, SocketState::Disconnected);
+    assert_eq!(next_state(&mut system).await, SocketState::Connected);
+    // The client logs in again on the new socket, as before.
+    h.venue.wait_frames("auth", 2).await;
+
+    // A deliberate disconnect is not a loss.
+    h.client.disconnect().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(system.try_recv().is_err(), "disconnect reported a state");
+
+    // A new trade socket on the next connect still reports.
+    h.client.connect().await.unwrap();
+    assert_eq!(next_state(&mut system).await, SocketState::Connected);
+
+    // Built outside the registry scope, the control does not claim reconnect support:
+    // a `LiveNode` answers a reconnect command for this client with `Unsupported`.
+    for endpoint in ["trade", "market_data"] {
+        assert!(matches!(
+            registry.get(client_id(), endpoint.into()),
+            SocketReconnectLookup::ClientNotFound
+        ));
+    }
+    h.client.disconnect().await.unwrap();
 }
