@@ -38,6 +38,8 @@ again.
 | `cargo check --manifest-path fuzz/Cargo.toml` | Passes (type check only) |
 | `cargo fmt --check --manifest-path fuzz/Cargo.toml` | Clean |
 
+The two `cargo test` counts above are checked by `./checks.sh` (step `test count`): a change in the number of tests fails the gate until these rows say the new total.
+
 The tests use dummy key strings and a mock server on `127.0.0.1`. They open no connection to
 the venue.
 
