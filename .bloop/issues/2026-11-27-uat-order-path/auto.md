@@ -1,5 +1,5 @@
-WAITING: NEEDS-INFO. 1) Will a person with a UAT key run the nine UAT gate steps themselves, approving each, and when? 2) How do the real frames reach the repo: (a) the person hands over raw answers and frames with the key removed, or (b) a first slice adds a frame-recording option to exec_tester that the person runs?
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -21,3 +21,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
 
 - 2026-11-27T13:51Z · waiting · restate needs answers only the person can give
+- 2026-11-27T14:38Z · user · person answered "1" to both questions (they run UAT; recording option in exec_tester first) and "1" to the restate; confirmed
