@@ -14,7 +14,7 @@ STATUS: BLOCKED
 - [ ] 3 `origin/main` holds `retro.md` of `2026-11-27-market-data-socket-state` — after PR #4 merges
 - [ ] 4 the closed issue is archived — slice 3, after PR #4 merges
 - [ ] 5 `baseBranch` still `main` — unchanged in this branch, checked again on `main` after the merge
-- [ ] 6 no file under `src/` or `tests/` changed — `git diff --stat origin/main claude/bloop-init -- src tests` must be empty; checked again after the merge
+- [ ] 6 no file under `src/` or `tests/` changed — before the merge: `git diff --stat origin/main $(git merge-tree --write-tree origin/main claude/bloop-init) -- src tests Cargo.toml Cargo.lock docs/STATUS.md` is empty (checked at `0d3a8ff`); a plain two-dot diff shows 3 files only because `claude/bloop-init` predates the socket-state code, which the merge keeps. Checked again after the merge
 - [ ] 7 both merges done by a person — after the merges
 
 ## Notes for reviewers
