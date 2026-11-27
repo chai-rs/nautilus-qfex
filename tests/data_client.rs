@@ -29,6 +29,7 @@ use nautilus_common::{
     },
 };
 use nautilus_core::{UUID4, UnixNanos};
+use nautilus_live::{SocketReconnectRegistry, SocketReconnectRequestOutcome};
 use nautilus_model::{
     data::{BarType, Data},
     enums::{AggressorSide, BookAction, BookType, MarketStatusAction},
@@ -509,6 +510,91 @@ async fn socket_state_follows_the_market_data_socket() {
 
     // `close()` built a new socket: it still reports.
     client.connect().await.unwrap();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+    client.disconnect().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reconnect_command_reconnects_the_market_data_socket() {
+    let (config, venue) = start_venue().await;
+    let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+    replace_data_event_sender(sender);
+    let (sender, mut system) = tokio::sync::mpsc::unbounded_channel();
+    replace_system_event_sender(sender);
+    let client_id = ClientId::from("QFEX-DATA");
+    // A `LiveNode` builds its data clients inside its registry scope.
+    let registry = SocketReconnectRegistry::default();
+    let mut client = registry
+        .scope(|| QfexDataClient::new(client_id, config))
+        .unwrap();
+    let request = || {
+        registry
+            .handle(client_id, "market_data".into())
+            .expect("market_data has a reconnect handle")
+            .request_reconnect()
+    };
+    assert_eq!(
+        request(),
+        SocketReconnectRequestOutcome::Closed,
+        "before connect"
+    );
+
+    client.connect().await.unwrap();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+    let aapl = InstrumentId::from("AAPL-USD-PERP.QFEX");
+    client
+        .subscribe_quotes(SubscribeQuotes::new(
+            aapl,
+            Some(client_id),
+            None,
+            UUID4::new(),
+            UnixNanos::default(),
+            None,
+            None,
+        ))
+        .unwrap();
+    let subscribed = venue.wait_for_requests(1).await;
+
+    assert_eq!(request(), SocketReconnectRequestOutcome::Accepted);
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Disconnected
+    );
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+    let seen = venue.wait_for_requests(2 * subscribed.len()).await;
+    assert_eq!(
+        seen[subscribed.len()..],
+        subscribed[..],
+        "subscriptions sent again"
+    );
+
+    client.disconnect().await.unwrap();
+    assert_ne!(
+        request(),
+        SocketReconnectRequestOutcome::Accepted,
+        "after disconnect"
+    );
+
+    // `close()` built a new socket: the command reaches it too.
+    client.connect().await.unwrap();
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Connected
+    );
+    assert_eq!(request(), SocketReconnectRequestOutcome::Accepted);
+    assert_eq!(
+        next_state(&mut system, client_id).await,
+        SocketState::Disconnected
+    );
     assert_eq!(
         next_state(&mut system, client_id).await,
         SocketState::Connected
