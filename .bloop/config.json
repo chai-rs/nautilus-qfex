@@ -1,5 +1,16 @@
 {
   "version": 1,
-  "project": { "kind": "backend" },
-  "architecture": { "style": "nautilus-adapter", "boundaryRuleConfig": null }
+  "project": {
+    "kind": "backend"
+  },
+  "architecture": {
+    "style": "nautilus-adapter",
+    "boundaryRuleConfig": null
+  },
+  "contract": {
+    "openapi": null,
+    "preview": null,
+    "dataModel": "./docs/data-model.md",
+    "external": "./docs/external"
+  }
 }
