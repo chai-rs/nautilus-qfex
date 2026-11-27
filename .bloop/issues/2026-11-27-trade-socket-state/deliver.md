@@ -1,6 +1,6 @@
-STATUS: GATED
-MERGE: none
-MERGED-AT: none
+STATUS: MERGED
+MERGE: ce9d457
+MERGED-AT: 2026-11-27
 DEPLOYED-AT: none
 DEPLOYED-BY: none
 ROLLED-BACK-AT: none
@@ -11,7 +11,7 @@ ROLLED-BACK-AT: none
 | --- | --- | --- |
 | sync | `bin/ship 2026-11-27-trade-socket-state` | up to date with `origin/main` (`4b46b86`) |
 | re-gate | `bin/gate --e2e` inside `bin/ship` | exit 0 |
-| merge | not run | waits for a person: `deliver.autoMerge.medium` is false |
+| merge | merged by the agent on the person's request in session ("merge PR 8 กับ 9 ให้หน่อย"), PR #8, merge commit; CI `check` and `fuzz` green on the PR | `ce9d457` |
 | deploy | not applicable | a library; mocha pins the merge commit |
 
 ## Watch after deploy

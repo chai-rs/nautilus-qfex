@@ -1,5 +1,5 @@
-WAITING: merge PR #8 (feat/2026-11-27-trade-socket-state, RISK medium) into main? deliver.autoMerge.medium is false, so a person merges
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -29,3 +29,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-27T13:50Z · waiting · restate needs a person's yes; it settles the Connected-means-what question the issue left open
 - 2026-11-27T14:26Z · user · person answered "1" (yes, Connected means transport up); restate confirmed
 - 2026-11-27T16:04Z · waiting · deliver: merge of PR #8 needs a person
+- 2026-11-27T16:12Z · user · person asked to merge PR 8 and 9; PR #8 merged as ce9d457
