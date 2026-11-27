@@ -28,7 +28,9 @@ use nautilus_common::{
     },
 };
 use nautilus_core::{UnixNanos, params::Params, time::get_atomic_clock_realtime};
-use nautilus_live::{ExecutionClientCore, ExecutionEventEmitter};
+use nautilus_live::{
+    ExecutionClientCore, ExecutionEventEmitter, SocketControl, SocketControlFactory,
+};
 use nautilus_model::{
     accounts::AccountAny,
     enums::OmsType,
@@ -51,7 +53,10 @@ use ustr::Ustr;
 
 use self::{dispatch::OrderDispatch, order::is_stop};
 use crate::{
-    common::{credential::QfexCredential, parse::venue_symbol_of, urls::qfex_trade_ws_url},
+    common::{
+        consts::QFEX_VENUE, credential::QfexCredential, parse::venue_symbol_of,
+        urls::qfex_trade_ws_url,
+    },
     config::exec::QfexExecClientConfig,
     http::{
         client::{MAX_PAGE_LIMIT, QfexHttpClient, QfexUserQuery},
@@ -67,6 +72,9 @@ use crate::{
         messages::{QfexTradeRequest, QfexWsMessage, QfexWsOrder, QfexWsOrders},
     },
 };
+
+/// Endpoint label of the trade socket in `SocketStateChanged`.
+const TRADE_ENDPOINT: &str = "trade";
 
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Longest wait for the answer to the login and to `get_user_orders`.
@@ -494,6 +502,9 @@ pub struct QfexExecutionClient {
     shared: Option<Arc<Shared>>,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
+    /// Built on the first `connect`, outside the node's reconnect registry scope: no reconnect
+    /// handler is registered, so a reconnect command answers `Unsupported`.
+    socket: Option<SocketControl>,
 }
 
 impl QfexExecutionClient {
@@ -517,6 +528,7 @@ impl QfexExecutionClient {
             shared: None,
             cancel: CancellationToken::new(),
             tasks: Vec::new(),
+            socket: None,
         })
     }
 
@@ -747,7 +759,12 @@ impl ExecutionClient for QfexExecutionClient {
             .base_url_ws
             .clone()
             .unwrap_or_else(|| qfex_trade_ws_url(config.environment).to_string());
-        let mut ws = QfexWebSocketClient::new_trade(&url, signer, config.cancel_on_disconnect)?;
+        let client_id = self.core.client_id;
+        let socket = self.socket.get_or_insert_with(|| {
+            SocketControlFactory::new(client_id, Some(*QFEX_VENUE)).control(TRADE_ENDPOINT)
+        });
+        let mut ws = QfexWebSocketClient::new_trade(&url, signer, config.cancel_on_disconnect)?
+            .with_state_sink(socket.sink());
         let caught_up_ns = AtomicU64::new(now().as_u64());
         let mut rx = ws.connect().await?;
         if let Err(e) = logged_in(&mut rx).await {

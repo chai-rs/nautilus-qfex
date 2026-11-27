@@ -26,7 +26,7 @@ The adapter keeps no durable state. Its entities are NautilusTrader 0.67.0 types
 - Every market data event and every order refers to exactly one instrument id ending in `.QFEX`.
 - An order has one client order id for its whole life and one venue order id at a time; a modify replaces the venue order id.
 - A fill belongs to one order and has one venue trade id.
-- A socket state event belongs to one client id and one endpoint (`market_data` or the trade endpoint).
+- A socket state event belongs to one client id and one endpoint (`market_data` or `trade`).
 
 ## Invariants
 
@@ -40,5 +40,5 @@ Each one is a statement a test can check.
 6. An order type or time in force the venue lacks (stop limit, trailing stop, GTD, FOK market) is denied before any frame is sent.
 7. Account total = `available_balance + order_margin + position_margin`, locked = `order_margin + position_margin`, currency `USDC`.
 8. When a socket connects, drops and reconnects once, the events for its `(client_id, endpoint)` are `Connected`, `Disconnected`, `Connected` in that order. After `close()` builds a new WebSocket client, that client still publishes through a sink of the same endpoint.
-9. Socket state events of the market data socket carry venue `QFEX` and endpoint `market_data`.
+9. Socket state events carry venue `QFEX` and the endpoint of their socket: `market_data` for the market data socket, `trade` for the trade socket.
 10. No secret appears in any `Debug` or `Display` output, log line, or event.

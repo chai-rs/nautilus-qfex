@@ -1,8 +1,8 @@
 # Status
 
 Date: 11 Nov 2026, updated 12 Nov 2026 (section "Parity with `nautilus-lighter`"), 13 Nov
-2026 (section "Tooling around the adapter") and 27 Nov 2026 (socket state of the market data
-socket, test counts). Plan: `docs/PLAN.md`.
+2026 (section "Tooling around the adapter") and 27 Nov 2026 (socket state of both sockets,
+reconnect command of the data client, test counts). Plan: `docs/PLAN.md`.
 
 ## Summary
 
@@ -28,8 +28,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 170 passed, 0 failed: 143 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 5 data client, 12 execution client (27 Nov 2026, Linux; 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | The same 170 |
+| `cargo test --features examples` | 171 passed, 0 failed: 143 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 5 data client, 13 execution client (27 Nov 2026, Linux; 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | The same 171 |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
@@ -73,10 +73,10 @@ server only.
 | `http` authenticated (`/user/positions`, `/user/trade`, historic orders, fees, leverage) | UNVERIFIED on the venue: no key. Mock; the fixtures are hand-made from the docs |
 | `signing` | HMAC checked against `openssl` and RFC 4231 case 2. UNVERIFIED on the venue (see Signing) |
 | `websocket` MDS client (subscribe, ping, reconnect, resubscribe) | Live for subscribe and data. Reconnect and resubscribe: mock |
-| `websocket` trade client (auth, session start, reconnect) | UNVERIFIED on the venue. Mock |
+| `websocket` trade client (auth, session start, reconnect, socket state) | UNVERIFIED on the venue. Mock |
 | `book` (pulsed book) | Live: recorded `level2` frames; one book per 500 ms seen in the run |
 | `data` client | Live: the `data_tester` run. Mock: `tests/data_client.rs` on recorded frames |
-| Socket state of the market data socket (`SocketStateChanged`, endpoint `market_data`, venue `QFEX`) | Mock: `socket_state_follows_the_market_data_socket` (connect, drop, reconnect, deliberate disconnect, connect again) and the unit test `mds_state_sink_sees_connect_loss_and_reconnect`. The trade socket publishes no socket state. Under a `LiveNode`, a controller reconnect command for the data client, endpoint `market_data`, reaches the socket: `Accepted` while connected (the socket drops, reconnects and resubscribes), `Closed` before `connect()` and after `disconnect()`. Mock: `reconnect_command_reconnects_the_market_data_socket` (inside a `SocketReconnectRegistry` scope) and the unit test `mds_reconnect_request_follows_the_connection`. The trade socket registers no reconnect handler |
+| Socket state (`SocketStateChanged`, venue `QFEX`, endpoints `market_data` and `trade`) | Mock: `socket_state_follows_the_market_data_socket` (connect, drop, reconnect, deliberate disconnect, connect again) and the unit test `mds_state_sink_sees_connect_loss_and_reconnect`. Trade socket: Mock: `socket_state_follows_the_trade_socket` (connect, drop, reconnect with a second login, deliberate disconnect, connect again). `Connected` means the transport is up, not logged in; if the venue refuses the login, the client closes the socket deliberately, so an actor sees `Connected` and no `Disconnected`. Under a `LiveNode`, a controller reconnect command for the data client, endpoint `market_data`, reaches the socket: `Accepted` while connected (the socket drops, reconnects and resubscribes), `Closed` before `connect()` and after `disconnect()`. Mock: `reconnect_command_reconnects_the_market_data_socket` (inside a `SocketReconnectRegistry` scope) and the unit test `mds_reconnect_request_follows_the_connection`. The trade socket registers no reconnect handler: its control is built on the first `connect()`, outside the node's registry scope, so a reconnect command for the execution client answers `Unsupported`; a later handler for it would need the control built in `new` |
 | Book depth (`subscribe_book_depth`) | Live: 45 + 45 depth updates in the `data_tester` run. Mock: 10 levels a side from the recorded 20-level `level2` frame |
 | Instrument status (`subscribe_instrument_status`) | Mock on the recorded `/refdata`, which has all three status values. Live: the first status (`Trading`) of two symbols in the `data_tester` run of 13 Nov; a status change was never seen |
 | `execution` client (submit, modify, cancel, cancel all, stop orders, events) | UNVERIFIED on the venue. Mock: `tests/exec_client.rs` |
