@@ -1,6 +1,7 @@
 REVIEWER: code
 MODEL: default
-APPROVED: no
+APPROVED: yes
+APPROVED-BY: trustLevel autonomous
 
 # Controller can reconnect the market data socket
 
