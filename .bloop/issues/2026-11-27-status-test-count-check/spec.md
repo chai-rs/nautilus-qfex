@@ -26,7 +26,7 @@ Built on a branch cut from origin/main (`362bcb0`). Line numbers are those of or
 | `README.md` | Line 128: `CI workflow` row, "fmt, clippy, tests, 30 s per fuzz target" | stays true; no change |
 | `ARCHITECTURE.md` | G3 (23) measures the gate by test count; the `gate` row (112) says `checks.sh` runs the same steps as `.github/workflows/ci.yml` | stays true once `.github/workflows/ci.yml` calls `checks.sh`; no change |
 | `AGENTS.md` | "Keep `README.md` and `docs/STATUS.md` true: a change in ... the test count updates them in the same branch" (18) | the rule this step enforces; no change |
-| `.bloop/issues/2026-11-27-market-data-socket-state/retro.md` | Where the count slipped twice in one issue | why; read only |
+| `.bloop/archive/2026-11-27-market-data-socket-state/retro.md` | Where the count slipped twice in one issue | why; read only |
 | `rust-toolchain.toml` | Pins Rust 1.99.1, the toolchain whose `cargo test` output format the step parses | read only |
 
 Touches no contract we give and no other system's contract: the only outside format read is the `test result:` line of the pinned toolchain's own test harness.

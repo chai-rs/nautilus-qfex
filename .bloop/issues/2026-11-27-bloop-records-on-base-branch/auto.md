@@ -1,5 +1,5 @@
-WAITING: merge PR #4 (claude/bloop-init into main) with a merge commit, so build can run slice 3 (archive)
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -27,3 +27,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-27T13:45Z · waiting · restate asked which branch holds the bloop records
 - 2026-11-27T14:32Z · user · person answered "1" (merge claude/bloop-init into main, keep baseBranch main); intake ACCEPT, restate written and confirmed by the person
 - 2026-11-27T14:43Z · waiting · build blocked on the merge of PR #4, which only a person may do
+- 2026-11-27T15:19Z · user · person said "reviewed, can you merge all"; PR #4 merged as 3c0d7ed; archive done on chore/2026-11-27-records-after-merges

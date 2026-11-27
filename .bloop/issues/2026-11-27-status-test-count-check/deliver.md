@@ -1,6 +1,6 @@
-STATUS: GATED
-MERGE: none
-MERGED-AT: none
+STATUS: MERGED
+MERGE: fda6185
+MERGED-AT: 2026-11-27
 DEPLOYED-AT: none
 DEPLOYED-BY: none
 ROLLED-BACK-AT: none
@@ -11,8 +11,9 @@ ROLLED-BACK-AT: none
 | --- | --- | --- |
 | sync | `bin/ship 2026-11-27-status-test-count-check` | already up to date with `origin/main` (`362bcb0`) |
 | re-gate | `bin/gate --e2e` inside `bin/ship` | exit 0 |
-| merge | not run | waits for a person: `deliver.autoMerge.medium` is false and `bin/trust --for autonomous` is not met |
+
 | deploy | not applicable | CI and tooling only |
+| merge | merged by the agent on the person's request in session ("reviewed, can you merge all"), PR #6, merge commit | `fda6185`. Trial merge onto `3c0d7ed` gated green first (168 passed, as written) |
 
 ## Watch after deploy
 

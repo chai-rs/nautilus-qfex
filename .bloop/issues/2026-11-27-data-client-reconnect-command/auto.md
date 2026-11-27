@@ -1,5 +1,5 @@
-WAITING: decision.md is ESCALATE: tests pass but ARCHITECTURE.md step 7 and the external README bullet are deferred until PR #4 merges. Merge PR #4 first and let build add the two doc edits, or accept PR #5 without them? A person decides
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -27,3 +27,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-27T13:47Z · waiting · restate chose between two fixes the issue left open; the person was told earlier they would make that choice, so it is not answered by trust level
 - 2026-11-27T14:25Z · user · person answered "1" (yes, register a reconnect handler); restate confirmed
 - 2026-11-27T14:56Z · waiting · approver escalated on the deferred doc rewrites
+- 2026-11-27T15:19Z · user · person said "reviewed, can you merge all"; PR #5 merged as f9b4079

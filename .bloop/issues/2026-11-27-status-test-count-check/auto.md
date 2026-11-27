@@ -1,5 +1,5 @@
-WAITING: merge PR #6 (ci/2026-11-27-status-test-count-check, RISK medium) into main? deliver.autoMerge.medium is false, so a person merges. Mind the order with PR #5 (count 170)
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -29,3 +29,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-27T13:48Z · waiting · restate needs a person's yes; the restate also holds a wrong claim about CI
 - 2026-11-27T14:34Z · user · person answered "1": restate rewritten so the check job of ci.yml calls ./checks.sh; confirmed
 - 2026-11-27T15:07Z · waiting · deliver: merge of PR #6 needs a person
+- 2026-11-27T15:19Z · user · person said "reviewed, can you merge all"; PR #6 merged as fda6185
