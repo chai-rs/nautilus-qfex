@@ -18,6 +18,7 @@ Rules an agent reads before touching this repo. People can read them too.
 - Keep `README.md` and `docs/STATUS.md` true: a change in behaviour or in the test count updates them in the same branch
 - Port from `nautilus-risex` or `nautilus-lighter` 0.67.0 when they already solve the problem, and say which file you followed
 - Commit bloop records (`.bloop/issues/<id>/`) on the issue's own branch, which `bin/work` cuts from `origin/main`, so they land on `main` with the code in the same pull request. Never keep them on a long-lived side branch
+- Records written after the code's pull request has merged (`deliver.md`, `retro.md`) cannot ride with the code. Commit them in the main checkout on a short branch cut from `origin/main`, named `chore/<id>-records`, and open a pull request a person merges. `bin/archive` commits on local `main` only: push that commit with `git push origin main:chore/<id>-archive`, open a pull request, then `git reset --hard origin/main` on local `main`. Never push to `main` itself
 
 ## Never
 
