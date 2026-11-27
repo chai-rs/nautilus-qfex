@@ -56,10 +56,17 @@ struct Venue {
     /// Socket requests as `(type, channel, symbol)`.
     requests: Arc<Mutex<Vec<(String, String, String)>>>,
     failures: Arc<Mutex<Vec<String>>>,
+    /// Cut only through `drop_socket`.
     drop_connection: Arc<Notify>,
 }
 
 impl Venue {
+    /// Cuts the market data socket. `notify_one` keeps the permit when `serve` is busy
+    /// answering, where `notify_waiters` would be lost.
+    fn drop_socket(&self) {
+        self.drop_connection.notify_one();
+    }
+
     /// Acknowledges a subscribe and sends the first recorded frame of each channel and symbol.
     async fn serve(self, mut socket: WebSocket) {
         loop {
@@ -303,7 +310,7 @@ async fn connect_subscribe_reconnect_request_and_disconnect() {
     assert_eq!(venue.wait_for_requests(4).await, subscribed);
 
     // The venue drops the socket: the client connects again and asks for everything again.
-    venue.drop_connection.notify_waiters();
+    venue.drop_socket();
     let mut again = venue.wait_for_requests(8).await.split_off(4);
     again.sort();
     let mut expected = subscribed.to_vec();
@@ -493,7 +500,7 @@ async fn socket_state_follows_the_market_data_socket() {
         SocketState::Connected
     );
 
-    venue.drop_connection.notify_one();
+    venue.drop_socket();
     assert_eq!(
         next_state(&mut system, client_id).await,
         SocketState::Disconnected

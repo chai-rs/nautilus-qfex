@@ -13,6 +13,7 @@ Every bloop record of an issue reaches `main` by one route that an agent can fol
   - `chore/2026-11-27-retro-status-test-count-check` (`0b01b80` retro, `93dce31` archive, `dfe46ed` review and deliver of `2026-11-27-bloop-records-on-base-branch`)
   - the retro of `2026-11-27-bloop-records-on-base-branch` itself, on that same branch
 - `bin/archive` refuses off `loop.baseBranch`, so an archive is always a local commit on `main` that has to be pushed to another branch name.
+- Seen a fourth time, in the retro of `2026-11-27-trade-socket-state`. Its records from before the merge (intake to build) were committed on `chore/2026-11-27-retro-status-test-count-check`, a branch of another issue, not on `feat/2026-11-27-trade-socket-state`. Its `deliver.md` followed the `AGENTS.md` clause: it went on `chore/2026-11-27-trade-socket-state-records` (PR #10, `7e67051`) with no trouble. So that route works for records written after the merge, and the gap is only in records written before it.
 
 ## What is asked
 
