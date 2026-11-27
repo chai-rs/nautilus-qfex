@@ -1,5 +1,5 @@
-WAITING: merge PR #3 (feat/2026-11-27-market-data-socket-state, RISK medium) into main? deliver.autoMerge.medium is false, so a person merges
-STOPPED: waiting
+WAITING: none
+STOPPED: done
 
 ## Runs
 
@@ -32,3 +32,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 
 - 2026-11-27T12:56Z · waiting · approver escalated: reconnect command for the data client now reports UnknownEndpoint, not recorded in any doc
 - 2026-11-27T13:15Z · waiting · deliver: merge of PR #3 needs a person (RISK medium, autoMerge.medium false)
+- 2026-11-27T13:17Z · done · PR #3 merged by a person as 362bcb0

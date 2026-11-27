@@ -1,6 +1,6 @@
-STATUS: GATED
-MERGE: none
-MERGED-AT: none
+STATUS: MERGED
+MERGE: 362bcb0
+MERGED-AT: 2026-11-27
 DEPLOYED-AT: none
 DEPLOYED-BY: none
 ROLLED-BACK-AT: none
@@ -13,7 +13,7 @@ Dates are `YYYY-MM-DD`. They are headers rather than prose because `bin/metrics`
 | --- | --- | --- |
 | sync | `bin/ship 2026-11-27-market-data-socket-state` | already up to date with `origin/main` (`4f4ed16`), nothing replayed |
 | re-gate | `bin/gate --e2e` inside `bin/ship` | exit 0 |
-| merge | not run | waits for a person: `deliver.autoMerge.medium` is false and `bin/trust --for autonomous` is not met (4 landings, 5 needed) |
+| merge | merged on GitHub by the repository owner (PR #3, merge commit) | `362bcb0`, tree identical to the gated `733509e`. A person merged because `deliver.autoMerge.medium` is false and `bin/trust --for autonomous` is not met (4 landings, 5 needed) |
 | deploy | not applicable | a library; mocha pins the merge commit |
 
 ## Watch after deploy
