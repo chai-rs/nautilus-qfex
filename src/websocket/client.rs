@@ -14,7 +14,10 @@ use std::{
 use nautilus_common::live::get_runtime;
 use nautilus_network::{
     RECONNECTED, SocketStateSink,
-    websocket::{WebSocketClient, WebSocketConfig, channel_message_handler},
+    mode::ReconnectRequestOutcome,
+    websocket::{
+        WebSocketClient, WebSocketConfig, WebSocketReconnectHandle, channel_message_handler,
+    },
 };
 use serde_json::Value;
 use strum::IntoEnumIterator;
@@ -347,6 +350,8 @@ pub struct QfexWebSocketClient {
     task: Option<JoinHandle<()>>,
     pump: Option<JoinHandle<()>>,
     state_sink: Option<SocketStateSink>,
+    /// The live transport's reconnect handle, shared with [`Self::reconnect_request`].
+    reconnect: Arc<parking_lot::Mutex<Option<WebSocketReconnectHandle>>>,
 }
 
 impl Debug for QfexWebSocketClient {
@@ -375,6 +380,7 @@ impl QfexWebSocketClient {
             task: None,
             pump: None,
             state_sink: None,
+            reconnect: Arc::default(),
         }
     }
 
@@ -383,6 +389,19 @@ impl QfexWebSocketClient {
     pub fn with_state_sink(mut self, sink: SocketStateSink) -> Self {
         self.state_sink = Some(sink);
         self
+    }
+
+    /// Asks the live transport to reconnect; `Closed` while there is none.
+    pub fn reconnect_request(
+        &self,
+    ) -> impl Fn() -> ReconnectRequestOutcome + Send + Sync + 'static {
+        let reconnect = self.reconnect.clone();
+        move || {
+            reconnect.lock().as_ref().map_or(
+                ReconnectRequestOutcome::Closed,
+                WebSocketReconnectHandle::request_reconnect,
+            )
+        }
     }
 
     /// A trade client: authenticates, subscribes to the four private channels and, when asked,
@@ -427,6 +446,7 @@ impl QfexWebSocketClient {
             task: None,
             pump: None,
             state_sink: None,
+            reconnect: Arc::default(),
         })
     }
 
@@ -465,6 +485,7 @@ impl QfexWebSocketClient {
             return Err(e);
         }
         let (out_tx, out_rx) = mpsc::unbounded_channel();
+        *self.reconnect.lock() = Some(client.reconnect_handle());
         self.client = Some(client.clone());
         if self.session.signer.is_none() {
             self.pump = Some(
@@ -479,6 +500,7 @@ impl QfexWebSocketClient {
 
     /// Closes the connection and stops the read and subscribe tasks.
     pub async fn disconnect(&mut self) {
+        self.reconnect.lock().take();
         if let Some(client) = self.client.take() {
             client.disconnect().await;
         }
@@ -662,7 +684,7 @@ mod tests {
         response::Response,
         routing::get,
     };
-    use nautilus_network::{SocketState, SocketStateSink};
+    use nautilus_network::{SocketState, SocketStateSink, mode::ReconnectRequestOutcome};
     use serde_json::{Value, json};
     use tokio::sync::Notify;
 
@@ -976,6 +998,37 @@ mod tests {
             json!({"type": "unsubscribe", "channels": ["bbo"], "symbols": ["AAPL-USD"]})
         );
         client.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn mds_reconnect_request_follows_the_connection() {
+        let (venue, url) = MockVenue::start().await;
+        let mut client = QfexWebSocketClient::new_mds(url);
+        let request = client.reconnect_request();
+        assert_eq!(request(), ReconnectRequestOutcome::Closed, "before connect");
+
+        client
+            .subscribe(QfexMdsChannel::Level2, aapl())
+            .await
+            .unwrap();
+        let mut rx = client.connect().await.unwrap();
+        wait_until("the subscribe", || venue.requests(1).len() == 1).await;
+
+        assert_eq!(request(), ReconnectRequestOutcome::Accepted);
+        loop {
+            if matches!(next(&mut rx).await, QfexWsMessage::Reconnected) {
+                break;
+            }
+        }
+        wait_until("the resubscribe", || venue.requests(2).len() == 1).await;
+        assert_eq!(venue.requests(2), venue.requests(1));
+
+        client.disconnect().await;
+        assert_eq!(
+            request(),
+            ReconnectRequestOutcome::Closed,
+            "after disconnect"
+        );
     }
 
     #[tokio::test]

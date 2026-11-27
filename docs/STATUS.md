@@ -28,8 +28,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 168 passed, 0 failed: 142 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 4 data client, 12 execution client (27 Nov 2026, Linux; 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | The same 168 |
+| `cargo test --features examples` | 169 passed, 0 failed: 143 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 4 data client, 12 execution client (27 Nov 2026, Linux; 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | The same 169 |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
