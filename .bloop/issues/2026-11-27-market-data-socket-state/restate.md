@@ -1,4 +1,4 @@
-CONFIRMED: no
+CONFIRMED: yes
 
 # Market data socket publishes its connection state
 
