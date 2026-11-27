@@ -1,7 +1,8 @@
 # Status
 
-Date: 11 Nov 2026, updated 12 Nov 2026 (section "Parity with `nautilus-lighter`") and 13 Nov
-2026 (section "Tooling around the adapter"). Plan: `docs/PLAN.md`.
+Date: 11 Nov 2026, updated 12 Nov 2026 (section "Parity with `nautilus-lighter`"), 13 Nov
+2026 (section "Tooling around the adapter") and 27 Nov 2026 (socket state of the market data
+socket, test counts). Plan: `docs/PLAN.md`.
 
 ## Summary
 
@@ -27,8 +28,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 162 passed, 0 failed: 137 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 3 data client, 12 execution client (152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | The same 162 |
+| `cargo test --features examples` | 168 passed, 0 failed: 142 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 4 data client, 12 execution client (27 Nov 2026, Linux; 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | The same 168 |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
@@ -73,6 +74,7 @@ server only.
 | `websocket` trade client (auth, session start, reconnect) | UNVERIFIED on the venue. Mock |
 | `book` (pulsed book) | Live: recorded `level2` frames; one book per 500 ms seen in the run |
 | `data` client | Live: the `data_tester` run. Mock: `tests/data_client.rs` on recorded frames |
+| Socket state of the market data socket (`SocketStateChanged`, endpoint `market_data`, venue `QFEX`) | Mock: `socket_state_follows_the_market_data_socket` (connect, drop, reconnect, deliberate disconnect, connect again) and the unit test `mds_state_sink_sees_connect_loss_and_reconnect`. The trade socket publishes no socket state |
 | Book depth (`subscribe_book_depth`) | Live: 45 + 45 depth updates in the `data_tester` run. Mock: 10 levels a side from the recorded 20-level `level2` frame |
 | Instrument status (`subscribe_instrument_status`) | Mock on the recorded `/refdata`, which has all three status values. Live: the first status (`Trading`) of two symbols in the `data_tester` run of 13 Nov; a status change was never seen |
 | `execution` client (submit, modify, cancel, cancel all, stop orders, events) | UNVERIFIED on the venue. Mock: `tests/exec_client.rs` |

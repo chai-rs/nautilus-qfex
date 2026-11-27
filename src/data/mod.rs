@@ -33,6 +33,7 @@ use nautilus_core::{
     datetime::datetime_to_unix_nanos,
     time::{AtomicTime, get_atomic_clock_realtime},
 };
+use nautilus_live::{SocketControl, SocketControlFactory};
 use nautilus_model::{
     data::{BarType, Data, InstrumentStatus},
     enums::{BookType, MarketStatusAction},
@@ -56,6 +57,9 @@ use crate::{
         QfexWebSocketClient, QfexWsClientError, QfexWsMessage, handler::parse_mds_message,
     },
 };
+
+/// Endpoint label of the market data socket in `SocketStateChanged`.
+const MARKET_DATA_ENDPOINT: &str = "market_data";
 
 /// The venue closes a bar some time after the interval ends.
 const BAR_POLL_DELAY: Duration = Duration::from_secs(2);
@@ -123,6 +127,7 @@ struct Feed {
     http: QfexHttpClient,
     // `connect` and `disconnect` of the WebSocket client need `&mut self`
     ws: Arc<tokio::sync::Mutex<QfexWebSocketClient>>,
+    socket: Arc<SocketControl>,
     instruments: Arc<DashMap<InstrumentId, InstrumentAny>>,
     subscriptions: Arc<DashSet<(Kind, InstrumentId)>>,
     /// Instruments with a status subscription, and the status last sent for each.
@@ -267,7 +272,7 @@ impl Feed {
         let mut ws = self.ws.lock().await;
         ws.disconnect().await;
         // The client keeps its recorded subscriptions for the next connect: start a new one
-        *ws = QfexWebSocketClient::new_mds(ws_url);
+        *ws = QfexWebSocketClient::new_mds(ws_url).with_state_sink(self.socket.sink());
         self.subscriptions.clear();
         self.statuses.clear();
     }
@@ -301,11 +306,14 @@ impl QfexDataClient {
             config.proxy_url.clone(),
             None,
         )?;
+        let socket =
+            SocketControlFactory::new(client_id, Some(*QFEX_VENUE)).control(MARKET_DATA_ENDPOINT);
         let feed = Feed {
             http,
-            ws: Arc::new(tokio::sync::Mutex::new(QfexWebSocketClient::new_mds(
-                ws_url(&config),
-            ))),
+            ws: Arc::new(tokio::sync::Mutex::new(
+                QfexWebSocketClient::new_mds(ws_url(&config)).with_state_sink(socket.sink()),
+            )),
+            socket: Arc::new(socket),
             instruments: Arc::new(DashMap::new()),
             subscriptions: Arc::new(DashSet::new()),
             statuses: Arc::new(DashMap::new()),
