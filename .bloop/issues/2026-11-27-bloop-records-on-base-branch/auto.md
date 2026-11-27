@@ -1,5 +1,5 @@
-WAITING: which branch holds the bloop records? 1) merge claude/bloop-init into main through a PR a person merges, loop.baseBranch stays main (recommended) 2) set loop.baseBranch to claude/bloop-init
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -21,3 +21,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
 
 - 2026-11-27T13:45Z · waiting · restate asked which branch holds the bloop records
+- 2026-11-27T14:32Z · user · person answered "1" (merge claude/bloop-init into main, keep baseBranch main); intake ACCEPT, restate written and confirmed by the person
