@@ -12,5 +12,55 @@
     "preview": null,
     "dataModel": "./docs/data-model.md",
     "external": "./docs/external"
+  },
+  "taskManagement": {
+    "provider": "local",
+    "issuesDir": ".bloop/issues",
+    "idFormat": "date-slug"
+  },
+  "git": {
+    "strategy": "trunk",
+    "branchTypes": [
+      "feat",
+      "fix",
+      "perf",
+      "refactor",
+      "test",
+      "docs",
+      "build",
+      "ci",
+      "chore",
+      "hotfix"
+    ],
+    "mergeStyle": "merge",
+    "commitConvention": "free"
+  },
+  "checks": {
+    "command": "./checks.sh",
+    "e2e": null
+  },
+  "loop": {
+    "maxRounds": 3,
+    "baseBranch": "main",
+    "concurrency": 2,
+    "trustLevel": "supervised",
+    "revertCeiling": 0.05,
+    "trustWindowDays": 30,
+    "trustPreviousDays": 30,
+    "trustMinLandings": 5,
+    "autoBudget": 12
+  },
+  "deliver": {
+    "sync": "rebase",
+    "autoMerge": {
+      "low": false,
+      "medium": false,
+      "high": false
+    },
+    "deployCommand": null,
+    "rollbackCommand": null,
+    "watchFor": [
+      "mocha pins the merged rev and its socket state check passes"
+    ]
   }
 }

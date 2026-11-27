@@ -1,0 +1,20 @@
+# bloop:managed audit-workflow
+# The dependency audit lives here, not in checks.sh, because it needs the network
+# and its result changes on its own even when the code does not.
+name: audit
+
+on:
+  schedule:
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+# bloop:end audit-workflow
