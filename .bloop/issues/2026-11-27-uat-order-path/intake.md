@@ -1,4 +1,4 @@
-DECISION: NEEDS-INFO
+DECISION: ACCEPT
 TYPE: test
 FR: FR-4
 RISK: high
@@ -17,7 +17,6 @@ RESCOPED: no
 
 `AGENTS.md` says "Never send an authenticated request or an order to the live QFEX venue, from a test, an example, a binary or a script", and `issue.md` agrees that a person must provide `QFEX_UAT_API_KEY` / `QFEX_UAT_API_SECRET` and approve every step that leaves the machine. The code cannot answer whether such a person is available or when: G2 in `ARCHITECTURE.md` (as on `origin/main`, `362bcb0`) has no date beyond "when a UAT key is available", and `docs/STATUS.md` records that no key was ever used. The agent's share also depends on how the frames come back: `examples/exec_tester.rs` connects to UAT with the key from the environment but has no recording option, so either the person captures the raw REST answers and trade-socket frames by hand, or a first slice adds a recording option for the person to run. Risk is high because the run touches auth, real orders and a key that must never land in git, a log line or a fixture; SURFACES is `security` for the same reason.
 
-## Questions
+## Answers
 
-1. Will a person with a UAT key run the nine steps of "The UAT gate" in `docs/STATUS.md` themselves, approving each one, and if so, when?
-2. How should the real frames reach the repository: (a) that person saves the raw REST answers and trade-socket frames, key removed, and hands them over, and the agent then replaces fixtures and updates `docs/STATUS.md`, `docs/PLAN.md` and G2; or (b) a first slice adds an option to `exec_tester` that writes every frame it sends and receives to a file, with the key never written, for the person to run?
+- 2026-11-27, the person: they run the nine UAT steps themselves with their UAT key, approving each one; frames reach the repository through a recording option added to `exec_tester` first (option 1 to both questions)
