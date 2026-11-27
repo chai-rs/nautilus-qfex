@@ -1,6 +1,7 @@
 REVIEWER: code
 MODEL: default
-APPROVED: no
+APPROVED: yes
+APPROVED-BY: trustLevel autonomous
 
 # Market data socket publishes its connection state
 
@@ -19,20 +20,20 @@ APPROVED: no
 | `src/websocket/client.rs` | `QfexWebSocketClient::new_mds` / `new_trade` store the URL and session; `connect()` builds `WebSocketClient::builder().config(..).message_handler(..).connect()` | must change: hold an `Option<SocketStateSink>`, set by a new `with_state_sink(sink)`, and pass it to the builder's `state_sink`; `new_mds(url)` and `new_trade` keep their signatures and default to `None` |
 | `src/data/mod.rs` | `QfexDataClient::new` builds `Feed` with `QfexWebSocketClient::new_mds(ws_url)` (line 306); `Feed::close` replaces it with another `new_mds` (line 270); `Feed::run` logs `QfexWsMessage::Reconnected` (line 170) | must change: build the `SocketControl` in `new`, keep it in `Feed`, give `new_mds(..).with_state_sink(control.sink())` in both places; the log line stays |
 | `tests/data_client.rs` | stand-in REST + MDS socket on `127.0.0.1` (`start_venue`, `Venue::serve`); `Venue::drop_connection` cuts the socket; `replace_data_event_sender` captures data events | reuse, do not rewrite: add one test that also calls `replace_system_event_sender` before `QfexDataClient::new` and uses `drop_connection` |
-| `nautilus-live` 0.67.0 `src/socket.rs` | `SocketControlFactory::new(client_id, venue)` reads the thread-local system event sender at construction; `control(endpoint).sink()` returns a `SocketStateSink`; a new `sink()` from the same control retires the previous one | reuse, do not rewrite |
-| `nautilus-network` 0.67.0 `src/websocket/client.rs` | `WebSocketClient::builder` takes `state_sink: Option<SocketStateSink>` | reuse, do not rewrite |
-| `nautilus-common` 0.67.0 `src/live/runner.rs`, `src/messages/mod.rs` | `replace_system_event_sender` (thread-local); `SystemEvent::SocketState(SocketStateChange)` | reuse in the test |
+| `nautilus-live 0.67.0 src/socket.rs` | `SocketControlFactory::new(client_id, venue)` reads the thread-local system event sender at construction; `control(endpoint).sink()` returns a `SocketStateSink`; a new `sink()` from the same control retires the previous one | reuse, do not rewrite |
+| `nautilus-network 0.67.0 src/websocket/client.rs` | `WebSocketClient::builder` takes `state_sink: Option<SocketStateSink>` | reuse, do not rewrite |
+| `nautilus-common 0.67.0 src/live/runner.rs` and `nautilus-common 0.67.0 src/messages/mod.rs` | `replace_system_event_sender` (thread-local); `SystemEvent::SocketState(SocketStateChange)` | reuse in the test |
 | `docs/STATUS.md` | Verification table with test counts (says 162; HEAD counts 166) | must change: new test, new count, a line on socket state |
 | `docs/data-model.md` | invariants 8 and 9 on socket state | the test checks them |
 
-**This change has to reach** callers: `QfexDataClient::new`, `Feed::close`, `QfexExecutionClient` (calls `new_trade`, unchanged signature) · tests: `tests/data_client.rs` (new test), existing unit tests of `websocket::client` · fixtures: none · config: none · exports: `QfexWebSocketClient::with_state_sink` is new; `new_mds(url)` keeps its signature, so `bin/trades_probe.rs:54` and the five unit tests in `src/websocket/client.rs` that call it need no change
+**This change has to reach** callers: `QfexDataClient::new`, `Feed::close`, `QfexExecutionClient` (calls `new_trade`, unchanged signature) · tests: `tests/data_client.rs` (new test), existing unit tests of `websocket::client` · fixtures: none · config: none · exports: `QfexWebSocketClient::with_state_sink` is new; `new_mds(url)` keeps its signature, so `bin/trades_probe.rs` (line 54) and the five unit tests in `src/websocket/client.rs` that call it need no change
 
 ## Slices
 
 | # | slice | check that proves it | status |
 | --- | --- | --- | --- |
-| 1 | `QfexWebSocketClient` holds an optional `SocketStateSink`, set by `with_state_sink`, and passes it to `WebSocketClient::builder().state_sink(..)`; without it nothing changes | `cargo test --lib websocket` passes and `cargo build --bins --examples --features examples` builds | todo |
-| 2 | `QfexDataClient` builds a `SocketControl` for `market_data` / `QFEX`, passes `sink()` in `new` and in `Feed::close`; new test `socket_state_follows_the_market_data_socket`; `docs/STATUS.md` updated | `cargo test --test data_client socket_state` passes and shows `Connected`, `Disconnected`, `Connected`; `cargo test` reports 167 passed | todo |
+| 1 | `QfexWebSocketClient` holds an optional `SocketStateSink`, set by `with_state_sink`, and passes it to `WebSocketClient::builder().state_sink(..)`; without it nothing changes | `cargo test --lib websocket` passes and `cargo build --bins --examples --features examples` builds | done |
+| 2 | `QfexDataClient` builds a `SocketControl` for `market_data` / `QFEX`, passes `sink()` in `new` and in `Feed::close`; new test `socket_state_follows_the_market_data_socket`; `docs/STATUS.md` updated | `cargo test --test data_client socket_state` passes and shows `Connected`, `Disconnected`, `Connected`; `cargo test` reports 167 passed | done |
 
 ## Acceptance criteria
 
