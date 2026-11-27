@@ -1,11 +1,13 @@
-STATUS: BLOCKED
+STATUS: READY
 
 ## Round 1
 
 | slice | commit | check | result | evidence |
 | --- | --- | --- | --- | --- |
 | 1 | `0d3a8ff` | `grep -n "issue's own branch" AGENTS.md`; `git merge-tree --write-tree origin/main claude/bloop-init`; `./checks.sh` | red first (grep exit 1), then the line prints at `AGENTS.md:20`; merge-tree exit 0; gate exit 0 | `evidence/slice-1.md` (PASS) |
-| 2 | `0d3a8ff` (head of PR) | PR #4 from `claude/bloop-init` into `main`, 25 commits ahead | PR opened as a draft: https://github.com/chai-rs/nautilus-qfex/pull/4. Waits for a person to merge | none yet |
+| 2 | `0d3a8ff` (head of PR) | PR #4 from `claude/bloop-init` into `main`, 25 commits ahead | PR #4 merged with a merge commit as `3c0d7ed`, on the person's request in session; `git merge-base --is-ancestor origin/claude/bloop-init origin/main` exits 0 | none (GitHub merge) |
+
+| 3 | `354922c` | `bin/archive 2026-11-27-market-data-socket-state --apply` on `main` after removing its clean, merged worktree | archive commit made on local `main`, moved to branch `chore/2026-11-27-records-after-merges`; local `main` reset to `origin/main`; lands with that PR | none |
 
 ## Acceptance criteria
 
