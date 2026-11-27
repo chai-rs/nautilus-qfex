@@ -8,7 +8,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | # | when | box | skill | before | after | result |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 2026-11-27T13:45Z | 2 | restate | no-intake | needs-info | NEEDS-INFO: a person picks the branch for the records |
-
+| 2 | 2026-11-27T15:00Z | 3 | plan | awaiting-plan | planned | 3 slices; trustLevel autonomous approved |
 | 3 | 2026-11-27T14:43Z | 4 | build | planned | blocked | slice 1 green; PR #4 opened; slice 2 waits for a person to merge |
 
 ## Answered by trust level
