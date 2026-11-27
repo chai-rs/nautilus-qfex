@@ -14,23 +14,23 @@ APPROVED: no
 
 ## Context
 
-Built on a branch cut from `origin/main` (`362bcb0`). Line numbers are those of `origin/main`; the same files exist in this checkout, where `docs/STATUS.md` still says 162.
+Built on a branch cut from origin/main (`362bcb0`). Line numbers are those of origin/main; the same files exist in this checkout, where `docs/STATUS.md` still says 162.
 
 | path | what it does today | how this work relates |
 | --- | --- | --- |
-| `checks.sh` | The one gate, `#!/bin/sh` with `set -eu`, a `step()` helper, `bloop:managed checks` markers. Step `unit + integration` (29-31) runs `cargo test` then `cargo test --features examples` with output straight to the terminal. Step `shortcut marker` (35-51) shows the house style for a failing check: build a message, `printf ... >&2`, `exit 1`. Header (5) says it runs the same steps as the `check` job of `ci.yml` | must change: each `cargo test` keeps its stdout in a temp file (`mktemp`, removed on exit) and prints it, without losing the exit code (dash has no `pipefail`, so no plain `| tee`); a new step `test count` after it sums and compares. Reuse `step()` and the `shortcut marker` failure style, do not rewrite them. Header comment says `ci.yml` calls this file (slice 2) |
+| `checks.sh` | The one gate, a POSIX sh script (dash here) with `set -eu`, a `step()` helper, `bloop:managed checks` markers. Step `unit + integration` (29-31) runs `cargo test` then `cargo test --features examples` with output straight to the terminal. Step `shortcut marker` (35-51) shows the house style for a failing check: build a message, `printf ... >&2`, `exit 1`. Header (5) says it runs the same steps as the `check` job of `.github/workflows/ci.yml` | must change: each `cargo test` keeps its stdout in a temp file (`mktemp`, removed on exit) and prints it, without losing the exit code (dash has no `pipefail`, so no plain pipe into `tee`); a new step `test count` after it sums and compares. Reuse `step()` and the `shortcut marker` failure style, do not rewrite them. Header comment says `.github/workflows/ci.yml` calls this file (slice 2) |
 | `docs/STATUS.md` | Verification table: row `cargo test --features examples` (31) starts `168 passed, 0 failed: 142 unit, ...` and goes on with older counts (`166 at ...`); row `cargo test` (no feature, as in CI) (32) reads `The same 168`. Row `CI workflow` (89), row `CI` of "Tooling around the adapter" (138) and section `### CI` (169-175) describe the `check` job as its own list of cargo steps | read by the new step: the first `<N> passed` of the cell of row 31, and `The same <N>` of row 32. Must change: one sentence under the Verification table saying the gate checks these two numbers (slice 1); rows 89 and 138 and `### CI` say the `check` job runs `./checks.sh` (slice 2). The numbers themselves stay 168 |
-| `.github/workflows/ci.yml` | Job `check` (6-18): checkout, `dtolnay/rust-toolchain@1.99.1` with `rustfmt, clippy`, `Swatinem/rust-cache@v2`, then five `run:` lines that repeat `checks.sh` by hand (no `shortcut marker`, no count). Job `fuzz` (19-33) | must change: the five `run:` lines become one `run: ./checks.sh`; checkout, toolchain and cache stay. `fuzz` is not touched |
+| `.github/workflows/ci.yml` | Job `check` (6-18): checkout, the dtolnay rust-toolchain action at 1.99.1 with `rustfmt, clippy`, the Swatinem rust-cache action, then five `run:` lines that repeat `checks.sh` by hand (no `shortcut marker`, no count). Job `fuzz` (19-33) | must change: the five `run:` lines become one `run: ./checks.sh`; checkout, toolchain and cache stay. `fuzz` is not touched |
 | `.github/workflows/audit.yml` | Dependency audit, kept out of `checks.sh` because it needs the network (comment line 2) | no change; example of what stays out of the gate |
 | `README.md` | Line 128: `CI workflow` row, "fmt, clippy, tests, 30 s per fuzz target" | stays true; no change |
-| `ARCHITECTURE.md` | G3 (23) measures the gate by test count; the `gate` row (112) says `checks.sh` runs the same steps as `ci.yml` | stays true once `ci.yml` calls `checks.sh`; no change |
+| `ARCHITECTURE.md` | G3 (23) measures the gate by test count; the `gate` row (112) says `checks.sh` runs the same steps as `.github/workflows/ci.yml` | stays true once `.github/workflows/ci.yml` calls `checks.sh`; no change |
 | `AGENTS.md` | "Keep `README.md` and `docs/STATUS.md` true: a change in ... the test count updates them in the same branch" (18) | the rule this step enforces; no change |
 | `.bloop/issues/2026-11-27-market-data-socket-state/retro.md` | Where the count slipped twice in one issue | why; read only |
 | `rust-toolchain.toml` | Pins Rust 1.99.1, the toolchain whose `cargo test` output format the step parses | read only |
 
 Touches no contract we give and no other system's contract: the only outside format read is the `test result:` line of the pinned toolchain's own test harness.
 
-**This change has to reach** callers: `.github/workflows/ci.yml` job `check`; every `./checks.sh` run (each slice in box 4 Build, `bin/gate`) · tests: none added in Rust; the proof runs `./checks.sh` against a wrong `docs/STATUS.md` · fixtures: none · config: `.github/workflows/ci.yml` · exports: none
+**This change has to reach** callers: `.github/workflows/ci.yml` job `check`; every `./checks.sh` run (each slice in box 4 Build, bloop's gate script) · tests: none added in Rust; the proof runs `./checks.sh` against a wrong `docs/STATUS.md` · fixtures: none · config: `.github/workflows/ci.yml` · exports: none
 
 ## Prototype
 
