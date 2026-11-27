@@ -1,6 +1,7 @@
 REVIEWER: code
 MODEL: default
-APPROVED: no
+APPROVED: yes
+APPROVED-BY: trustLevel autonomous
 
 # The gate checks the test count written in STATUS.md
 

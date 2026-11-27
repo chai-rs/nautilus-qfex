@@ -15,6 +15,7 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 
 | when | level | skill | question | answer |
 | --- | --- | --- | --- | --- |
+| 2026-11-27T15:00Z | autonomous | plan | Approve this plan? | yes |
 
 ## Stops
 
