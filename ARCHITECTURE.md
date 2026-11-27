@@ -20,7 +20,7 @@ The usual alternative is no adapter: mocha calls QFEX itself.
 | --- | --- | --- | --- | --- |
 | G1 mocha actors see the market data socket go down and come back | `SocketStateChanged` events from venue `QFEX`, endpoint `market_data`, in order `Connected` → `Disconnected` → `Connected` | 3 of 3 | 2026-12-04 | `cargo test --test data_client socket_state`, and mocha pinning the merged rev |
 | G2 an order path that has run against the venue, not only against the mock | UAT steps of `docs/STATUS.md` done: login, submit, cancel, one fill | 4 of 4 (now 0) | when a UAT key is available | the Verification table of `docs/STATUS.md` |
-| G3 every change is gated | `./checks.sh` passes on every PR, with at least 162 tests | 100 % of PRs | ongoing | GitHub Actions `ci.yml` (has not run on GitHub yet) |
+| G3 every change is gated | `./checks.sh` passes on every PR, with at least 162 tests | 100 % of PRs | ongoing | GitHub Actions `ci.yml`, whose `check` job runs `./checks.sh` since `fda6185`; `gh run list` shows every run |
 
 ## Scope
 
@@ -109,7 +109,7 @@ The usual alternative is no adapter: mocha calls QFEX itself.
 | async and network | tokio, tokio-tungstenite (rustls), `nautilus-network` (sockudo) | what the other 0.67.0 adapters use |
 | tests | `cargo test`, rstest, axum mock server, recorded fixtures | offline and deterministic |
 | benches and fuzz | criterion; cargo-fuzz on nightly | parity with `nautilus-risex` |
-| gate | `cargo fmt --check`, `cargo clippy --all-targets -D warnings` with and without `--features examples`, `cargo test` | the same steps as `ci.yml` |
+| gate | `./checks.sh`: `cargo fmt --check`, `cargo clippy --all-targets -D warnings` and `cargo test`, each with and without `--features examples`, then the test count of `docs/STATUS.md` and the `shortcut:` marker check | the `check` job of `ci.yml` runs `./checks.sh` itself, so CI and a dev machine run the same steps |
 
 ## Codebase shape
 

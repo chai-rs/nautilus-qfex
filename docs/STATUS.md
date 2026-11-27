@@ -88,9 +88,9 @@ server only.
 | `bin/trades_probe.rs` (`qfex-trades-probe`) | 2 unit tests; run once, keyless, against the mainnet market data socket |
 | `bin/flatten.rs` (`qfex-flatten`) | UNVERIFIED on the venue: compiles; never run against the venue. 8 unit tests of its plan and of how it reads the answers |
 | Benches | Build; one run (see "Benches") |
-| CI workflow | The `check` job runs `./checks.sh` (since 27 Nov 2026), which passes on this machine. The workflow never ran on GitHub; the `fuzz` job never ran anywhere |
+| CI workflow | The `check` job runs `./checks.sh` (since 27 Nov 2026). The workflow runs on GitHub on every push and pull request since 12 Nov 2026: the first run on `main` failed, every run after it passed. Last checked: run `46026490835` on `main` at `4b46b86` (27 Nov 2026), both jobs green |
 | Python binding | Compiles and 1 test with the patch. Loadable wheel: UNVERIFIED |
-| Fuzz package | Type check only. No target ran |
+| Fuzz package | Each of the six targets ran 30 s in the CI `fuzz` job (run `46023650252`, 27 Nov 2026), no crash. Not run on this machine |
 
 ## Parity with `nautilus-lighter` (12 Nov 2026)
 
@@ -137,7 +137,7 @@ What `nautilus-risex` has around its adapter: benches, binaries, CI.
 | `qfex-trades-probe` | Added: `bin/trades_probe.rs`. Market data socket only, one `trade` subscription, no REST request, no key. Prints the venue's own fields | Unit: `test_arguments_give_the_venue_symbol_and_the_limit`, `test_trade_line_of_a_recorded_frame`. Live: one run on 13 Nov 2026 (12 Nov 17:28 UTC), 3 trades of `US100-USD` in 3 s, exit code 0 |
 | `qfex-flatten` | Added: `bin/flatten.rs`. **Compiles; never run against the venue** | Unit, offline: `test_plan_cancels_first_then_closes_every_position`, `test_plan_sends_only_what_is_needed`, `test_outcome_tells_a_refusal_from_progress` (6 cases) |
 | Key-revoke binary | Not built: the venue has no API call for it | See "Key revocation" |
-| CI | Added: `.github/workflows/ci.yml` | The file parses as YAML. The `check` job runs `./checks.sh` (since 27 Nov 2026), which passes here. The workflow never ran on GitHub. The `fuzz` job never ran: nightly and `cargo-fuzz` are installed on the runner only, not on this machine |
+| CI | Added: `.github/workflows/ci.yml` | The `check` job runs `./checks.sh` (since 27 Nov 2026). The workflow runs on GitHub since 12 Nov 2026, green on `main` at `4b46b86`. The `fuzz` job runs on the runner only: nightly and `cargo-fuzz` are not installed on this machine |
 | `data_tester` | Subscribes to instrument status as well (book depth was already there) | The run of 13 Nov, see "Verification" |
 | WebSocket candles | Not done: the wire format is not in the docs | See "Candle channel" |
 
@@ -387,9 +387,10 @@ in one process fails.
 ## Fuzz
 
 Six targets type-check on 1.99.1: `rest_parse`, `mds_parse`, `trade_parse`, `book_apply`,
-`auth`, `wire_format`. **No target ran**: `cargo-fuzz` and a nightly toolchain are not installed
-here. There is no seed corpus. The `fuzz` job of `.github/workflows/ci.yml` runs each target
-for 30 seconds on the runner; that job has not run yet.
+`auth`, `wire_format`. They run only on the CI runner: `cargo-fuzz` and a nightly toolchain are
+not installed here. There is no seed corpus. The `fuzz` job of `.github/workflows/ci.yml` runs
+each target for 30 seconds; in run `46023650252` (27 Nov 2026, `main` at `fda6185`) each of the
+six finished its 30 seconds (between 0.5 and 2.6 million runs) with no crash.
 
 The target bodies are in `src/fuzzing.rs`. Six unit tests run them on 400 inputs each from a
 fixed-seed generator (fixtures with numeric values replaced by extreme ones, cut or damaged
