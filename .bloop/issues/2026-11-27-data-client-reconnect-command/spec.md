@@ -48,8 +48,8 @@ Depends on one outside system: NautilusTrader 0.67.0, recorded in `docs/external
 
 | # | slice | check that proves it | status |
 | --- | --- | --- | --- |
-| 1 | `QfexWebSocketClient` keeps its transport's `WebSocketReconnectHandle` in a shared slot (set in `connect()`, emptied in `disconnect()`) and exposes a request function over it; new unit test `mds_reconnect_request_follows_the_connection`; `docs/STATUS.md` counts updated. No caller uses it yet | `cargo test --lib reconnect_request` passes: `Closed` before connect, `Accepted` then a second `MockVenue` connection that receives the recorded subscriptions again, `Closed` after `disconnect()`; `cargo test` reports 169 passed | todo |
-| 2 | `QfexDataClient` registers the request function after each `socket.sink()` (in `new` and in `Feed::close`); new test `reconnect_command_reconnects_the_market_data_socket`; `docs/STATUS.md` row 77, `ARCHITECTURE.md` step 7 and the side-effect bullet of `docs/external/nautilustrader/README.md` rewritten | `cargo test --test data_client reconnect_command` passes; `cargo test` reports 170 passed, 0 failed | todo |
+| 1 | `QfexWebSocketClient` keeps its transport's `WebSocketReconnectHandle` in a shared slot (set in `connect()`, emptied in `disconnect()`) and exposes a request function over it; new unit test `mds_reconnect_request_follows_the_connection`; `docs/STATUS.md` counts updated. No caller uses it yet | `cargo test --lib reconnect_request` passes: `Closed` before connect, `Accepted` then a second `MockVenue` connection that receives the recorded subscriptions again, `Closed` after `disconnect()`; `cargo test` reports 169 passed | done |
+| 2 | `QfexDataClient` registers the request function after each `socket.sink()` (in `new` and in `Feed::close`); new test `reconnect_command_reconnects_the_market_data_socket`; `docs/STATUS.md` row 77, `ARCHITECTURE.md` step 7 and the side-effect bullet of `docs/external/nautilustrader/README.md` rewritten | `cargo test --test data_client reconnect_command` passes; `cargo test` reports 170 passed, 0 failed | done |
 
 ## Acceptance criteria
 
