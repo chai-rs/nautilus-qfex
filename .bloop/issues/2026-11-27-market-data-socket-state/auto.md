@@ -14,6 +14,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | 5 | 2026-11-27T13:05Z | 4 | build | escalated | reviewing | person chose option 1: side effect recorded in docs/STATUS.md, follow-up issue opened |
 | 6 | 2026-11-27T13:10Z | 5 | review | reviewing | approved | round 2: reviewer-code PASS, branch rebased onto claude/bloop-init, approver APPROVE; PR #3 marked ready |
 | 7 | 2026-11-27T13:15Z | 6 | deliver | approved | delivering | synced (no-op), gate green; merge waits for a person |
+| 8 | 2026-11-27T13:40Z | 6 | retro | merged | done | 3 lessons; 2 follow-up issues; archive refused (records not on main) |
 
 ## Answered by trust level
 
@@ -33,3 +34,4 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-27T12:56Z · waiting · approver escalated: reconnect command for the data client now reports UnknownEndpoint, not recorded in any doc
 - 2026-11-27T13:15Z · waiting · deliver: merge of PR #3 needs a person (RISK medium, autoMerge.medium false)
 - 2026-11-27T13:17Z · done · PR #3 merged by a person as 362bcb0
+- 2026-11-27T13:40Z · done · retro closed the issue; bin/archive refused off the base branch, folder left in place
