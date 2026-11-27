@@ -3,7 +3,7 @@ TYPE: ci
 FR: none
 RISK: medium
 SURFACES: none
-RESCOPED: no
+RESCOPED: yes
 
 ## Summary
 
