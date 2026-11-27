@@ -272,10 +272,19 @@ impl Feed {
         let mut ws = self.ws.lock().await;
         ws.disconnect().await;
         // The client keeps its recorded subscriptions for the next connect: start a new one
-        *ws = QfexWebSocketClient::new_mds(ws_url).with_state_sink(self.socket.sink());
+        *ws = market_data_socket(ws_url, &self.socket);
         self.subscriptions.clear();
         self.statuses.clear();
     }
+}
+
+/// A market data socket that reports its state to `socket` and takes its reconnect commands.
+///
+/// Every `sink()` drops the previous registration, so the two always go together.
+fn market_data_socket(url: String, socket: &SocketControl) -> QfexWebSocketClient {
+    let ws = QfexWebSocketClient::new_mds(url).with_state_sink(socket.sink());
+    socket.register(ws.reconnect_request());
+    ws
 }
 
 /// Market data client for QFEX.
@@ -310,9 +319,10 @@ impl QfexDataClient {
             SocketControlFactory::new(client_id, Some(*QFEX_VENUE)).control(MARKET_DATA_ENDPOINT);
         let feed = Feed {
             http,
-            ws: Arc::new(tokio::sync::Mutex::new(
-                QfexWebSocketClient::new_mds(ws_url(&config)).with_state_sink(socket.sink()),
-            )),
+            ws: Arc::new(tokio::sync::Mutex::new(market_data_socket(
+                ws_url(&config),
+                &socket,
+            ))),
             socket: Arc::new(socket),
             instruments: Arc::new(DashMap::new()),
             subscriptions: Arc::new(DashSet::new()),
