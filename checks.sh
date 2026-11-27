@@ -2,7 +2,7 @@
 # bloop:managed checks
 #
 # The one gate for this project. Dev machines and CI call this same file.
-# It runs the same steps as the `check` job of .github/workflows/ci.yml.
+# The `check` job of .github/workflows/ci.yml runs this file and nothing else.
 #
 #   ./checks.sh         format + lint + unit/integration   every slice, must run offline
 #   ./checks.sh --e2e   same as above: there is no E2E smoke test, because no test
