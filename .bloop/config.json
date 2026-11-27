@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "project": { "kind": "backend" },
+  "architecture": { "style": "nautilus-adapter", "boundaryRuleConfig": null }
+}
