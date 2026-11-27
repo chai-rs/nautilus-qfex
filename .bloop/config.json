@@ -43,7 +43,7 @@
     "maxRounds": 3,
     "baseBranch": "main",
     "concurrency": 2,
-    "trustLevel": "supervised",
+    "trustLevel": "autonomous",
     "revertCeiling": 0.05,
     "trustWindowDays": 30,
     "trustPreviousDays": 30,
