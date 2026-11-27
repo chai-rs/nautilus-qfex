@@ -120,12 +120,12 @@ config and of the credential redacts the secret. The examples and the binaries d
 |---|---|
 | HMAC signing (REST headers, WebSocket auth message) | Done; no vector from QFEX |
 | Python binding | Done (see Python) |
-| Fuzz package | Done; no target ran (see Fuzz) |
+| Fuzz package | Done; each target ran 30 s in the CI `fuzz` job on 27 Nov 2026, no crash (see Fuzz) |
 | Benches | Done: `book`, `data`, `exec`, `signing` (numbers in `docs/STATUS.md`) |
 | `qfex-flatten` | Done; compiles, never run against the venue |
 | `qfex-trades-probe` | Done; public market data socket, no key |
 | Key-revoke binary | Not on venue: keys are revoked in the web UI |
-| CI workflow | Done: `.github/workflows/ci.yml` (fmt, clippy, tests, 30 s per fuzz target); never ran on GitHub |
+| CI workflow | Done: `.github/workflows/ci.yml` (the `check` job runs `./checks.sh`, the `fuzz` job 30 s per fuzz target); runs on GitHub on every push and pull request since 12 Nov 2026, green on `main` at `4b46b86` |
 | TWAP, subaccounts, transfers, deposits and withdrawals, builder codes | Not done |
 | Wallet (web3) authentication, OAuth | Not done |
 
