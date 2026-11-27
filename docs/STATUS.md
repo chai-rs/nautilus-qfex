@@ -38,6 +38,8 @@ again.
 | `cargo check --manifest-path fuzz/Cargo.toml` | Passes (type check only) |
 | `cargo fmt --check --manifest-path fuzz/Cargo.toml` | Clean |
 
+The two `cargo test` counts above are checked by `./checks.sh` (step `test count`): a change in the number of tests fails the gate until these rows say the new total.
+
 The tests use dummy key strings and a mock server on `127.0.0.1`. They open no connection to
 the venue.
 
@@ -86,7 +88,7 @@ server only.
 | `bin/trades_probe.rs` (`qfex-trades-probe`) | 2 unit tests; run once, keyless, against the mainnet market data socket |
 | `bin/flatten.rs` (`qfex-flatten`) | UNVERIFIED on the venue: compiles; never run against the venue. 8 unit tests of its plan and of how it reads the answers |
 | Benches | Build; one run (see "Benches") |
-| CI workflow | The steps of the `check` job pass on this machine. The workflow never ran on GitHub; the `fuzz` job never ran anywhere |
+| CI workflow | The `check` job runs `./checks.sh` (since 27 Nov 2026), which passes on this machine. The workflow never ran on GitHub; the `fuzz` job never ran anywhere |
 | Python binding | Compiles and 1 test with the patch. Loadable wheel: UNVERIFIED |
 | Fuzz package | Type check only. No target ran |
 
@@ -135,7 +137,7 @@ What `nautilus-risex` has around its adapter: benches, binaries, CI.
 | `qfex-trades-probe` | Added: `bin/trades_probe.rs`. Market data socket only, one `trade` subscription, no REST request, no key. Prints the venue's own fields | Unit: `test_arguments_give_the_venue_symbol_and_the_limit`, `test_trade_line_of_a_recorded_frame`. Live: one run on 13 Nov 2026 (12 Nov 17:28 UTC), 3 trades of `US100-USD` in 3 s, exit code 0 |
 | `qfex-flatten` | Added: `bin/flatten.rs`. **Compiles; never run against the venue** | Unit, offline: `test_plan_cancels_first_then_closes_every_position`, `test_plan_sends_only_what_is_needed`, `test_outcome_tells_a_refusal_from_progress` (6 cases) |
 | Key-revoke binary | Not built: the venue has no API call for it | See "Key revocation" |
-| CI | Added: `.github/workflows/ci.yml` | The file parses as YAML. Every step of the `check` job was run here and passes. The workflow never ran on GitHub. The `fuzz` job never ran: nightly and `cargo-fuzz` are installed on the runner only, not on this machine |
+| CI | Added: `.github/workflows/ci.yml` | The file parses as YAML. The `check` job runs `./checks.sh` (since 27 Nov 2026), which passes here. The workflow never ran on GitHub. The `fuzz` job never ran: nightly and `cargo-fuzz` are installed on the runner only, not on this machine |
 | `data_tester` | Subscribes to instrument status as well (book depth was already there) | The run of 13 Nov, see "Verification" |
 | WebSocket candles | Not done: the wire format is not in the docs | See "Candle channel" |
 
@@ -168,8 +170,9 @@ Limits:
 
 ### CI
 
-The `check` job is the one of `nautilus-risex` (`fmt --check`, clippy with `-D warnings`,
-tests, toolchain 1.99.1), plus clippy and tests with `--features examples`. The `fuzz` job
+The `check` job runs `./checks.sh`, the same gate as on a dev machine: `fmt --check`, clippy
+with `-D warnings` and tests, each with and without `--features examples`, then the test count
+and shortcut marker checks (toolchain 1.99.1). The `fuzz` job
 installs nightly and `cargo-fuzz` on the runner and runs each file of `fuzz/fuzz_targets` for
 30 seconds (`-max_total_time=30`). Each command of that job carries `+nightly`, because
 `rust-toolchain.toml` pins the crate to 1.99.1.
