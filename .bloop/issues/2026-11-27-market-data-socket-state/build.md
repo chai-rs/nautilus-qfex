@@ -8,6 +8,12 @@ STATUS: READY
 | 2 | `1c17205` | `cargo test --test data_client socket_state`, then `./checks.sh` | red first (`no socket state within 10 s`), then green 10 of 10 runs; gate: 168 passed, 0 failed per `cargo test` run (142 unit, 8, 2, 4 data client, 12 exec client) | `evidence/slice-2.md` (PASS) |
 | all | `1c17205` | `./checks.sh --e2e` on the committed branch | exit 0, 14 `test result: ok` lines, nothing uncommitted | `evidence/final-e2e.md` (PASS) |
 
+## Round 2
+
+| slice | commit | check | result | evidence |
+| --- | --- | --- | --- | --- |
+| docs | `46c594b` | `./checks.sh --e2e` | exit 0, 168 passed, 0 failed; `docs/STATUS.md` socket state row now records the `UnknownEndpoint` outcome and points at the follow-up issue | `evidence/round-2.md` (PASS) |
+
 ## Acceptance criteria
 
 - [x] After `connect()`, `Connected` with the data client's `client_id`, venue `QFEX`, endpoint `market_data` — evidence `evidence/slice-2.md`, test `socket_state_follows_the_market_data_socket` (`next_state` asserts all three fields on every event)
@@ -17,6 +23,10 @@ STATUS: READY
 - [x] The trade socket publishes nothing new — `QfexWebSocketClient::new_trade` sets `state_sink: None` and `QfexExecutionClient` is untouched (`git diff 4f4ed16 -- src/execution` is empty)
 - [x] The 166 tests that passed at `4f4ed16` still pass — evidence `evidence/slice-2.md`: 168 passed, 0 failed. The spec said 167; slice 1 added a unit test too, so 166 + 2 = 168
 - [x] No test opens a connection outside `127.0.0.1` — both new tests use the existing stand-ins (`MockVenue::start`, `start_venue`), which bind `127.0.0.1:0`
+
+## Why the gate missed this
+
+- `[should]` (escalated by the approver) a reconnect command for the data client now answers `UnknownEndpoint` instead of `Unsupported` under a `LiveNode` — the gate has no test that builds the data client inside a `SocketReconnectRegistry` scope, and the plan read `SocketControlFactory` without reading `LiveNodeBuilder`. Step taken: recorded in `docs/STATUS.md`; the test that would catch it belongs to the follow-up issue `2026-11-27-data-client-reconnect-command`, which has to register the reconnect and assert the lookup
 
 ## Notes for reviewers
 
