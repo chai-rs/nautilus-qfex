@@ -17,6 +17,7 @@ Rules an agent reads before touching this repo. People can read them too.
 - Work one slice at a time. A slice is something that can merge into main on its own
 - Keep `README.md` and `docs/STATUS.md` true: a change in behaviour or in the test count updates them in the same branch
 - Port from `nautilus-risex` or `nautilus-lighter` 0.67.0 when they already solve the problem, and say which file you followed
+- Commit bloop records (`.bloop/issues/<id>/`) on the issue's own branch, which `bin/work` cuts from `origin/main`, so they land on `main` with the code in the same pull request. Never keep them on a long-lived side branch
 
 ## Never
 
