@@ -1,4 +1,4 @@
-CONFIRMED: no
+CONFIRMED: yes
 
 # Trade socket publishes its connection state
 

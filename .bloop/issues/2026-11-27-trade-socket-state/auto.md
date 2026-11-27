@@ -1,5 +1,5 @@
-WAITING: is restate.md right? It makes Connected mean "transport up" (not "logged in"), and leaves the reconnect command for the execution client answering UnknownEndpoint, recorded in STATUS.md, until a later issue. 1) yes 2) no, with what is wrong
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -21,3 +21,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
 
 - 2026-11-27T13:50Z · waiting · restate needs a person's yes; it settles the Connected-means-what question the issue left open
+- 2026-11-27T14:26Z · user · person answered "1" (yes, Connected means transport up); restate confirmed
