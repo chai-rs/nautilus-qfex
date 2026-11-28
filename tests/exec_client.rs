@@ -86,6 +86,7 @@ struct VenueState {
 struct Venue {
     state: Arc<Mutex<VenueState>>,
     push: broadcast::Sender<String>,
+    /// Cut only through `drop_socket`.
     drop_connection: Arc<Notify>,
 }
 
@@ -141,6 +142,12 @@ impl Venue {
 
     fn fail(&self, failure: String) {
         self.state.lock().failures.push(failure);
+    }
+
+    /// Cuts the trade socket. `notify_one` keeps the permit when `serve` is busy answering,
+    /// where `notify_waiters` would be lost.
+    fn drop_socket(&self) {
+        self.drop_connection.notify_one();
     }
 
     async fn serve(self, mut socket: WebSocket) {
@@ -955,7 +962,7 @@ async fn reconnect_logs_in_again_and_catches_up() {
     let order = limit("O-1");
     h.submit_accepted(&order, ORDER_ID).await;
     // While the socket is down the order is filled: it is no longer open at the venue.
-    h.venue.drop_connection.notify_waiters();
+    h.venue.drop_socket();
 
     h.venue.wait_frames("auth", 2).await;
     h.venue.wait_frames("subscribe", 2).await;
@@ -1006,15 +1013,11 @@ async fn socket_state_follows_the_trade_socket() {
     connected.unwrap();
     assert_eq!(next_state(&mut system).await, SocketState::Connected);
 
-    // `notify_waiters` is lost while the stand-in is busy answering, so drop until it lands.
-    let lost = loop {
-        h.venue.drop_connection.notify_waiters();
-        if let Ok(event) = tokio::time::timeout(Duration::from_millis(200), system.recv()).await {
-            break event.expect("system event channel closed");
-        }
-    };
-    let SystemEvent::SocketState(lost) = lost;
-    assert_eq!(lost.state, SocketState::Disconnected);
+    // Dropped after the login, as `Harness::connect` waits: a drop between the `auth` answer
+    // and its handling is `2026-11-27-trade-late-auth-answer`.
+    h.venue.wait_frames("subscribe", 1).await;
+    h.venue.drop_socket();
+    assert_eq!(next_state(&mut system).await, SocketState::Disconnected);
     assert_eq!(next_state(&mut system).await, SocketState::Connected);
     // The client logs in again on the new socket, as before.
     h.venue.wait_frames("auth", 2).await;
