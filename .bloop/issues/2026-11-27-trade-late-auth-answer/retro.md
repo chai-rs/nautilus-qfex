@@ -64,3 +64,4 @@ Anything this issue chose not to do, so the next person does not read the silenc
 - `nautilus-risex` and `nautilus-lighter` are not on this machine, so the epoch handling was not compared with them
 - Watch after deploy: there is no deploy. The four signals in `deliver.md` "Watch after deploy" need a live run, and nobody has reported mocha's socket state check against `4134e4c` (`deliver.watchFor`)
 - Product docs: `bin/docs` reports that `docs/product` does not exist, so nothing was refreshed
+- Archiving this folder: `bin/archive` refused on local `main` at `origin/main` `4134e4c` (`state is approved`), because `deliver.md` and this `retro.md` are only on `chore/2026-11-28-pr16-records`. It waits until that branch merges, then runs on `main`, and its commit goes out on `chore/2026-11-27-trade-late-auth-answer-archive`, per `AGENTS.md`
