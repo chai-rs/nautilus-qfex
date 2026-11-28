@@ -17,8 +17,9 @@ Dates are `YYYY-MM-DD`. They are headers rather than prose because `bin/metrics`
 | push | `bin/ship 2026-11-27-trade-late-auth-answer --push`, after the person said "force-push แล้ว merge" (force-push, then merge) | synced again with nothing to do on `4a32ba5`, gate exit 0 again in the same fresh target dir, then `git push --force-with-lease`. PR #16 head read `5721890` afterwards |
 | merge | GitHub merge of PR #16, `merge_method: merge`, `expectedHeadSha: 5721890cbae11500fb7e1bf9a6af60cac1c15bbc`, right after the merge-condition grep held on `4a32ba5` | merged as `4134e4c` on `main`, parents `4a32ba5` and `5721890`. `gh pr merge` was not used, it was refused with 403 earlier in this session |
 | fuzz | `bin/fuzz-due --merged` | `due: false`, no `fuzz` section in `.bloop/config.json` |
-| deploy | none | `deliver.deployCommand` is null and this crate ships nothing on merge. CI on the merge commit: run `46123378992` (`ci`, push to `main`), in progress when this was written. `STATUS` stays `MERGED` |
+| deploy | none | `deliver.deployCommand` is null and this crate ships nothing on merge. CI on the merge commit: run `46123378992` (`ci`, push to `main`), completed with success. `STATUS` stays `MERGED` |
 | docs | `bin/docs` | exit 1, `docs/product` does not exist yet. Nothing to refresh |
+| cleanup | `git worktree remove .worktrees/2026-11-27-trade-late-auth-answer`, after the person said "ลบได้" (yes, remove it) | removed, it had nothing uncommitted |
 
 ## Why a person merges this
 
