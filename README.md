@@ -11,8 +11,8 @@ request and no order went to QFEX; the HMAC signature has no test vector from QF
 
 ## Warnings
 
-- `examples/exec_tester.rs` has `DRY_RUN = true`. With `false` it submits orders on **mainnet**
-  with real funds. Start on UAT (`QfexEnvironment::Uat` in both configs).
+- `examples/exec_tester.rs` runs one step of "The UAT gate" in `docs/STATUS.md` on **UAT**
+  (`qfex.io`) and has no mainnet mode. Every step but `2` sends real orders to the UAT account.
 - The execution path follows the documentation alone. Do the UAT steps of `docs/STATUS.md`
   before any mainnet order.
 - `qfex-flatten` cancels every order and closes every position of the account. It prints the
@@ -30,7 +30,7 @@ cargo run --example data_tester --features examples
 ```
 
 ```bash
-cargo run --example exec_tester --features examples
+cargo run --example exec_tester --features examples -- 3   # one UAT step: 2, 3, 4, 5, 6 or 7
 ```
 
 ```bash
@@ -47,8 +47,10 @@ cargo bench --bench signing
 ```
 
 `data_tester` and `qfex-trades-probe` read public mainnet data and use no key. `exec_tester`
-and `qfex-flatten` need the environment variables below. There is no key-revoke binary: QFEX
-keys are revoked in the web UI (Developer Settings), not over the API.
+needs the two `QFEX_UAT_*` variables below and writes `recordings/uat-step-<step>.jsonl`
+(ignored by git): every REST answer and trade-socket frame, without the key, the secret or any
+signature. `qfex-flatten` needs the variables of the environment it runs on. There is no
+key-revoke binary: QFEX keys are revoked in the web UI (Developer Settings), not over the API.
 
 | Variable | Use |
 |---|---|

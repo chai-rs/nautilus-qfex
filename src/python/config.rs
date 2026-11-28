@@ -110,6 +110,7 @@ impl QfexExecClientConfig {
             api_secret,
             cancel_on_disconnect: cancel_on_disconnect.unwrap_or(defaults.cancel_on_disconnect),
             leverages: leverages.unwrap_or_default(),
+            record_path: None,
         }
     }
 

@@ -34,7 +34,10 @@ use super::{
     messages::{QfexMdsRequest, QfexTradeRequest, QfexWsMessage},
 };
 use crate::{
-    common::enums::{QfexMdsChannel, QfexTradeChannel},
+    common::{
+        enums::{QfexMdsChannel, QfexTradeChannel},
+        recording::QfexRecorder,
+    },
     signing::QfexSigner,
 };
 
@@ -69,6 +72,15 @@ struct Session {
     subscriptions: Subscriptions,
     /// Market data socket: paces the live subscribe path.
     gate: Arc<SubscribeGate>,
+    trade_recorder: Option<QfexRecorder>,
+}
+
+impl Session {
+    fn record_sent(&self, text: &str) {
+        if let Some(recorder) = &self.trade_recorder {
+            recorder.sent(text);
+        }
+    }
 }
 
 /// One outgoing market data frame: one channel and every symbol of it.
@@ -375,6 +387,7 @@ impl QfexWebSocketClient {
                 frames: Arc::default(),
                 subscriptions: Arc::default(),
                 gate: Arc::default(),
+                trade_recorder: None,
             },
             client: None,
             task: None,
@@ -388,6 +401,14 @@ impl QfexWebSocketClient {
     #[must_use]
     pub fn with_state_sink(mut self, sink: SocketStateSink) -> Self {
         self.state_sink = Some(sink);
+        self
+    }
+
+    /// Hands every frame of the trade socket, sent or received, to `recorder`. The `auth`
+    /// frame is recorded redacted and the URL, which carries the public key, never.
+    #[must_use]
+    pub fn with_recorder(mut self, recorder: QfexRecorder) -> Self {
+        self.session.trade_recorder = Some(recorder);
         self
     }
 
@@ -441,6 +462,7 @@ impl QfexWebSocketClient {
                 frames: Arc::new(frames),
                 subscriptions: Arc::default(),
                 gate: Arc::default(),
+                trade_recorder: None,
             },
             client: None,
             task: None,
@@ -575,7 +597,10 @@ impl QfexWebSocketClient {
             .client
             .as_ref()
             .ok_or_else(|| QfexWsClientError::Client("not connected".to_string()))?;
-        Ok(client.send_text(request.to_frame(), None).await?)
+        let frame = request.to_frame();
+        client.send_text(frame.clone(), None).await?;
+        self.session.record_sent(&frame);
+        Ok(())
     }
 }
 
@@ -604,15 +629,20 @@ async fn start_session(
         let auth = signer
             .auth()
             .map_err(|e| QfexWsClientError::Client(e.to_string()))?;
+        let frame = auth.ws_message();
         return match client
-            .send_text_on_connection(auth.ws_message(), None, epoch)
+            .send_text_on_connection(frame.clone(), None, epoch)
             .await
         {
             Err(SendError::ConnectionChanged) => {
                 log::warn!("QFEX WebSocket: connection replaced before auth, the next one logs in");
                 Ok(())
             }
-            sent => Ok(sent?),
+            sent => {
+                sent?;
+                session.record_sent(&frame);
+                Ok(())
+            }
         };
     }
 
@@ -646,11 +676,12 @@ async fn send_session_frames(client: &WebSocketClient, session: &Session, epoch:
         return;
     }
     for frame in session.frames.iter() {
-        if let Err(e) = client
+        match client
             .send_text_on_connection(frame.clone(), None, epoch)
             .await
         {
-            log::warn!("QFEX WebSocket: session frame not sent on its connection: {e}");
+            Ok(()) => session.record_sent(frame),
+            Err(e) => log::warn!("QFEX WebSocket: session frame not sent on its connection: {e}"),
         }
     }
 }
@@ -676,6 +707,9 @@ async fn read_loop(
                 log::warn!("QFEX WebSocket: session start after reconnect failed: {e}");
             }
             continue;
+        }
+        if let Some(recorder) = &session.trade_recorder {
+            recorder.received(&text);
         }
 
         let message = match QfexWsMessage::parse(&text) {
@@ -803,10 +837,10 @@ mod tests {
                             && self.defer_first_auth_then_drop.load(Ordering::SeqCst)
                         {
                             deferred.push(json!({"subscribed": "fills"}).to_string());
-                            deferred.push(json!({"type": "auth", "result": "success"}).to_string());
+                            deferred.push(json!({"authenticated": true}).to_string());
                             vec![]
                         } else if frame["type"] == "auth" {
-                            vec![json!({"type": "auth", "result": "success"}).to_string()]
+                            vec![json!({"authenticated": true}).to_string()]
                         } else if frame["type"] == "subscribe" && frame["params"].is_null() {
                             if self.refuse_now(&frame) {
                                 vec![

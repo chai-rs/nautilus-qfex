@@ -80,6 +80,7 @@ struct VenueState {
     posts: Vec<Value>,
     /// When set, `/user/trade` has this many trades, served in pages.
     trade_rows: usize,
+    seen_nonces_and_signatures: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -122,6 +123,8 @@ impl Venue {
         if key != API_KEY {
             return Err(format!("wrong public key '{key}'"));
         }
+        let seen = [nonce.to_string(), signature.to_string()];
+        self.state.lock().seen_nonces_and_signatures.extend(seen);
         let fresh = self.state.lock().nonces.insert(nonce.to_string());
         if nonce.is_empty() || nonce.len() > 100 || !fresh {
             return Err(format!("nonce '{nonce}' is empty, too long or used twice"));
@@ -202,7 +205,8 @@ impl Venue {
                 ];
             }
             *authenticated = true;
-            return vec![json!({"type": "auth", "result": "success"})];
+            // Recorded on UAT, 28 Nov 2026.
+            return vec![json!({"authenticated": true})];
         }
 
         let mut state = self.state.lock();
@@ -1032,4 +1036,67 @@ async fn socket_state_follows_the_trade_socket() {
         ));
     }
     h.client.disconnect().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recording_holds_the_frames_and_no_key() {
+    let path = std::env::temp_dir().join(format!("qfex-recording-{}.jsonl", UUID4::new()));
+    let record_path = path.clone();
+    let (mut h, connected) =
+        Harness::start(move |config, _| config.record_path = Some(record_path)).await;
+    connected.unwrap();
+    h.next_account().await;
+    h.venue.wait_frames("subscribe", 1).await;
+    let order = limit("O-1");
+    h.submit_accepted(&order, ORDER_ID).await;
+    h.cancel(&order);
+    h.venue.wait_frames("cancel_order", 1).await;
+    h.venue.push(&row(ORDER_ID, "O-1", "CANCELLED"));
+    assert!(matches!(h.applied().await, OrderEventAny::Canceled(_)));
+    h.client.disconnect().await.unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let frames = |dir: &str| -> Vec<Value> {
+        let lines = lines.iter().filter(|line| line["dir"] == dir);
+        lines
+            .map(|line| serde_json::from_str(line["text"].as_str().unwrap()).unwrap())
+            .collect()
+    };
+    let (sent, received) = (frames("sent"), frames("received"));
+
+    let positions = lines
+        .iter()
+        .find(|line| line["dir"] == "rest" && line["endpoint"] == "/user/positions")
+        .expect("no /user/positions answer");
+    assert_eq!(positions["method"], "GET");
+    assert_eq!(positions["status"], 200);
+    assert_eq!(positions["params"]["api_version"], "2026-10-29");
+    let body: Value = serde_json::from_str(positions["body"].as_str().unwrap()).unwrap();
+    assert_eq!(body, fixture("user_positions"));
+
+    assert_eq!(sent[0], json!({"type": "auth"}));
+    assert!(received.contains(&json!({"authenticated": true})));
+    assert!(sent.iter().any(|frame| frame["type"] == "subscribe"));
+    let add = sent.iter().find(|frame| frame["type"] == "add_order");
+    assert_eq!(add.unwrap()["params"]["client_order_id"], "O-1");
+    assert!(sent.iter().any(|frame| frame["type"] == "cancel_order"));
+    assert!(received.contains(&row(ORDER_ID, "O-1", "ACK")));
+    assert!(received.contains(&row(ORDER_ID, "O-1", "CANCELLED")));
+
+    let auth_values = h.venue.state.lock().seen_nonces_and_signatures.clone();
+    assert!(
+        auth_values.len() >= 4,
+        "the stand-in saw no REST and socket auth"
+    );
+    for secret in [API_KEY, API_SECRET, "api_key=", "x-qfex-"]
+        .into_iter()
+        .chain(auth_values.iter().map(String::as_str))
+    {
+        assert!(!text.contains(secret), "the recording holds {secret}");
+    }
 }

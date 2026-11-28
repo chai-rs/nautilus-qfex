@@ -180,7 +180,8 @@ impl QfexWsError {
 pub enum QfexWsMessage {
     /// The connection was re-established; not a venue frame.
     Reconnected,
-    /// `{"type":"auth","result":"success"}`.
+    /// `{"authenticated":true}` (recorded on UAT), or `{"type":"auth","result":"success"}` as in
+    /// the docs.
     Authenticated,
     /// A subscribe or unsubscribe acknowledgement.
     Subscribed,
@@ -245,6 +246,23 @@ impl QfexWsMessage {
             Self::Orders(payload(value)?)
         } else if let Some(value) = take("err") {
             Self::Error(payload(value)?)
+        } else if let Some(value) = take("authenticated") {
+            if value == Value::Bool(true) {
+                Self::Authenticated
+            } else {
+                // unverified: UAT showed only a successful login; anything else is a refusal.
+                let reason = frame
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                Self::Error(QfexWsError {
+                    error_code: None,
+                    message: format!("not authenticated ({value}) {reason}")
+                        .trim()
+                        .to_string(),
+                    incoming_message: Value::Null,
+                })
+            }
         } else if take("subscribed").is_some() || take("unsubscribed").is_some() {
             Self::Subscribed
         } else {
@@ -532,6 +550,29 @@ pub(crate) mod tests {
     #[case(r#"{"fill_response":7}"#)]
     fn test_bad_frames_are_errors(#[case] text: &str) {
         assert!(QfexWsMessage::parse(text).is_err());
+    }
+
+    #[rstest]
+    fn test_login_answer_recorded_on_uat_is_authenticated() {
+        // Recorded on QFEX UAT, 28 Nov 2026: the docs show `{"type":"auth","result":"success"}`.
+        let answer = QfexWsMessage::parse(r#"{"authenticated":true}"#).unwrap();
+        assert!(matches!(answer, QfexWsMessage::Authenticated));
+    }
+
+    #[rstest]
+    #[case(r#"{"authenticated":false}"#)]
+    #[case(r#"{"authenticated":false,"message":"bad signature"}"#)]
+    #[case(r#"{"authenticated":"yes"}"#)]
+    fn test_login_answer_without_authenticated_true_is_an_error(#[case] text: &str) {
+        let QfexWsMessage::Error(error) = QfexWsMessage::parse(text).unwrap() else {
+            panic!("{text} is not a refused login");
+        };
+        assert!(
+            error.message.contains("not authenticated"),
+            "{}",
+            error.message
+        );
+        assert_eq!(error.request_type(), None);
     }
 
     #[rstest]

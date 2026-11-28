@@ -29,8 +29,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 174 passed, 0 failed: 146 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 5 data client, 13 execution client (28 Nov 2026, Linux; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | The same 174 |
+| `cargo test --features examples` | 204 passed, 0 failed: 155 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 20 `exec_tester`, 5 data client, 14 execution client (28 Nov 2026, Linux, with the instrument argument of `exec_tester`; 197 before it, with the login answer recorded on UAT; 193 before that; 180 with the recording only; 174 before it; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | 184 passed: the same less the 20 `exec_tester` tests, which need the `examples` feature |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
@@ -75,6 +75,7 @@ server only.
 | `signing` | HMAC checked against `openssl` and RFC 4231 case 2. UNVERIFIED on the venue (see Signing) |
 | `websocket` MDS client (subscribe, ping, reconnect, resubscribe) | Live for subscribe and data. Reconnect and resubscribe: mock |
 | `websocket` trade client (auth, session start, reconnect, socket state) | UNVERIFIED on the venue. Mock. The `auth` frame and the private `subscribe` and cancel-on-disconnect frames go out only on the connection they belong to (`send_text_on_connection`), so a socket that drops between the venue's `auth` answer and its handling, or a late reconnect notice, puts nothing on the next socket before its own `auth`: unit checks `trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth` and `trade_stale_reconnect_sends_one_auth_and_one_session_on_the_next_socket` (fixed 28 Nov 2026, was 10 runs of 90 in the whole `exec_client` binary). An `auth` still waiting when its connection is replaced is refused by the writer and the next connection logs in from its own reconnect notice: unit check `trade_auth_for_a_connection_replaced_while_waiting_is_not_sent_and_the_next_logs_in`. Orders sent with `send` during a reconnect still use the ordinary send and can be replayed on the next socket before its `auth` (`2026-11-28-trade-orders-before-live-login`) |
+| Recording (`record_path` of `QfexExecClientConfig`) | Mock: `recording_holds_the_frames_and_no_key` (connect, submit, cancel: the file holds the `/user/positions` answer, the login answer, `add_order`, `ACK` and `CANCELLED`, and no key, secret, nonce, signature or `api_key=`) and the unit tests of `common::recording` (an `auth` frame sent is written as `{"type":"auth"}`; an error that echoes an `auth` request loses its `params`). One JSON line per REST answer (method, endpoint, query, status, raw body; no header) and per trade-socket text frame sent or received; appended, flushed line by line. Never run against the venue |
 | `book` (pulsed book) | Live: recorded `level2` frames; one book per 500 ms seen in the run |
 | `data` client | Live: the `data_tester` run. Mock: `tests/data_client.rs` on recorded frames |
 | Socket state (`SocketStateChanged`, venue `QFEX`, endpoints `market_data` and `trade`) | Mock: `socket_state_follows_the_market_data_socket` (connect, drop, reconnect, deliberate disconnect, connect again) and the unit test `mds_state_sink_sees_connect_loss_and_reconnect`. Trade socket: Mock: `socket_state_follows_the_trade_socket` (connect, drop, reconnect with a second login, deliberate disconnect, connect again). `Connected` means the transport is up, not logged in; if the venue refuses the login, the client closes the socket deliberately, so an actor sees `Connected` and no `Disconnected`. Under a `LiveNode`, a controller reconnect command for the data client, endpoint `market_data`, reaches the socket: `Accepted` while connected (the socket drops, reconnects and resubscribes), `Closed` before `connect()` and after `disconnect()`. Mock: `reconnect_command_reconnects_the_market_data_socket` (inside a `SocketReconnectRegistry` scope) and the unit test `mds_reconnect_request_follows_the_connection`. The trade socket registers no reconnect handler: its control is built on the first `connect()`, outside the node's registry scope, so a reconnect command for the execution client answers `Unsupported`; a later handler for it would need the control built in `new` |
@@ -85,7 +86,7 @@ server only.
 | Reconciliation (reports, paging, catch-up after reconnect) | UNVERIFIED on the venue. Mock |
 | `config`, `factories` | Unit tests; the data factory runs in `data_tester` |
 | `examples/data_tester.rs` | Run twice, keyless (11 and 13 Nov) |
-| `examples/exec_tester.rs` | Compiles only; never run against the venue |
+| `examples/exec_tester.rs` | Never run against the venue. Unit tests of the step mapping: UAT for every step, one recording file a step, no step or an unknown step refused |
 | `bin/trades_probe.rs` (`qfex-trades-probe`) | 2 unit tests; run once, keyless, against the mainnet market data socket |
 | `bin/flatten.rs` (`qfex-flatten`) | UNVERIFIED on the venue: compiles; never run against the venue. 8 unit tests of its plan and of how it reads the answers |
 | Benches | Build; one run (see "Benches") |
@@ -271,6 +272,23 @@ QFEX publishes no test vector, so no part of the signature is confirmed by the v
 
 Do these on UAT (`qfex.io`) with a UAT key, in this order, before any mainnet order:
 
+Results so far (28 Nov 2026, UAT, `exec_tester` from branch `test/2026-11-27-uat-order-path`):
+
+- Step 1 passed: `GET /user/positions` answered 200 with the balance of the account. The REST
+  HMAC headers are right.
+- Step 2 passed after one fix: the venue answers the login with `{"authenticated":true}`, not
+  with `{"type":"auth","result":"success"}` of the docs. The client waited 10 s for the shape
+  of the docs and stopped the connect. The parser now takes the recorded answer; any other
+  value of `authenticated` is a refused login (the refused shape is still not seen). After
+  the fix: login, the four private subscriptions, `get_user_orders`, and reconciliation of
+  `/user/positions`, `/user/trade` and `/user/historic-orders` all answered.
+- The UAT market data host `wss://mds.qfex.io` works: the data client loaded 53 instruments.
+- Step 3 not done: run on Saturday 28 Nov 2026, 12:29 UTC, in the `weekend` session of
+  `AAPL-USD`. In 67 s no quote came; the UAT book had one bid (50, size 1) and no ask, and the
+  books of `CL-USD`, `GOLD-USD`, `EUR-USD` and `US100-USD` were empty. The tester sent no
+  order. Steps 3 to 7 wait for a session with a two-sided book (`AAPL-USD` pre-market opens
+  Monday 04:00, venue time).
+
 1. `GET /user/positions`: proves the HMAC headers. A 401 here means the signature is wrong.
 2. Connect the trade socket: proves the auth message and shows the real login answer.
 3. Submit one post-only limit far from the market, then cancel it. Check that the ACK row
@@ -284,6 +302,30 @@ Do these on UAT (`qfex.io`) with a UAT key, in this order, before any mainnet or
 8. Replace the hand-made fixtures with the recorded frames.
 9. `qfex-flatten uat` with one resting order, one stop order and one small position. Check
    that the plan lists all three, and that the account is flat after Enter.
+
+### Commands
+
+Each command reads `QFEX_UAT_API_KEY` and `QFEX_UAT_API_SECRET` from the environment; set
+them in your shell, never in a file of the repository. `exec_tester` runs on UAT only and
+writes `recordings/uat-step-<step>.jsonl`, which git ignores. Stop it with Ctrl-C. The tester
+trades 0.010 `AAPL-USD-PERP.QFEX`, which trades in its market hours only. Two more arguments
+name another symbol and its order size, for example `-- 3 GOLD-USD 0.001`. UAT lists no
+crypto; every symbol has market hours, and on Saturday all of them are in their `weekend`
+session.
+
+| Step | Command | What it does |
+|---|---|---|
+| 1 and 2 | `cargo run --example exec_tester --features examples -- 2` | Connects: `GET /user/positions`, then the trade socket login. Dry run: no order |
+| 3 | `cargo run --example exec_tester --features examples -- 3` | One post-only limit buy 100 ticks under the best bid, cancelled on Ctrl-C |
+| 4 | `cargo run --example exec_tester --features examples -- 4` | As 3, then one modify of the resting order once it is accepted |
+| 5 | `cargo run --example exec_tester --features examples -- 5` | One market buy of 0.010 on the first quote, closed on Ctrl-C |
+| 6 | `cargo run --example exec_tester --features examples -- 6` | One stop-market buy 100 ticks over the market, cancelled on Ctrl-C |
+| 7 | `cargo run --example exec_tester --features examples -- 7` | One resting post-only limit buy with cancel on disconnect. Drop the network by hand for longer than 20 s (the heartbeat), then bring it back |
+| 8 | none | The agent cuts fixtures from the files of `recordings/` |
+| 9 | `cargo run --bin qfex-flatten uat` | Prints its plan, waits for Enter. Records nothing |
+
+The UAT market data host `wss://mds.qfex.io` is assumed (see below). If the tester gets no
+quote, steps 3 to 7 place no order; the recording of steps 1 and 2 still holds.
 
 ## Not verified against the venue
 
