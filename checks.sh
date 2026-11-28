@@ -2,7 +2,6 @@
 # bloop:managed checks
 #
 # The one gate for this project. Dev machines and CI call this same file.
-# The `check` job of .github/workflows/ci.yml runs this file and nothing else.
 #
 #   ./checks.sh         format + lint + unit/integration   every slice, must run offline
 #   ./checks.sh --e2e   same as above: there is no E2E smoke test, because no test
@@ -27,16 +26,14 @@ cargo clippy --all-targets --features examples -- -D warnings
 # Boundary rules (ARCHITECTURE.md, ADR-0001) are checked by review: no Rust tool is wired in.
 
 step "unit + integration"
-PLAIN=$(mktemp)
-EXAMPLES=$(mktemp)
-trap 'rm -f "$PLAIN" "$EXAMPLES"' EXIT
-# Kept for the count step; a failing run still stops the gate here.
-cargo test > "$PLAIN" 2>&1 || { cat "$PLAIN"; exit 1; }
-cat "$PLAIN"
-cargo test --features examples > "$EXAMPLES" 2>&1 || { cat "$EXAMPLES"; exit 1; }
-cat "$EXAMPLES"
+PLAIN_TEST_LOG=$(mktemp)
+EXAMPLES_TEST_LOG=$(mktemp)
+trap 'rm -f "$PLAIN_TEST_LOG" "$EXAMPLES_TEST_LOG"' EXIT
+cargo test > "$PLAIN_TEST_LOG" 2>&1 || { cat "$PLAIN_TEST_LOG"; exit 1; }
+cat "$PLAIN_TEST_LOG"
+cargo test --features examples > "$EXAMPLES_TEST_LOG" 2>&1 || { cat "$EXAMPLES_TEST_LOG"; exit 1; }
+cat "$EXAMPLES_TEST_LOG"
 
-# docs/STATUS.md writes the passing count of each run by hand: it has to match what ran.
 step "test count"
 counted() { awk '/^test result:/ { n += $4 } END { print n + 0 }' "$1"; }
 compare() {
@@ -53,9 +50,9 @@ compare() {
   printf '%s: %s passed, as written\n' "$row" "$written"
 }
 compare '`cargo test --features examples`' \
-  "$(sed -nE 's/^\| `cargo test --features examples` \| ([0-9]+) passed.*/\1/p' docs/STATUS.md)" "$EXAMPLES"
+  "$(sed -nE 's/^\| `cargo test --features examples` \| ([0-9]+) passed.*/\1/p' docs/STATUS.md)" "$EXAMPLES_TEST_LOG"
 compare '`cargo test`' \
-  "$(sed -nE 's/^\| `cargo test` \(no feature.*\| The same ([0-9]+) \|.*/\1/p' docs/STATUS.md)" "$PLAIN"
+  "$(sed -nE 's/^\| `cargo test` \(no feature.*\| The same ([0-9]+) \|.*/\1/p' docs/STATUS.md)" "$PLAIN_TEST_LOG"
 
 # A shortcut marker has to be complete: a ceiling and a trigger to revisit, comma separated.
 # The marker may wrap: the comment lines that follow it are read as part of it.

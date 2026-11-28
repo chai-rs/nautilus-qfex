@@ -56,7 +56,6 @@ struct Venue {
     /// Socket requests as `(type, channel, symbol)`.
     requests: Arc<Mutex<Vec<(String, String, String)>>>,
     failures: Arc<Mutex<Vec<String>>>,
-    /// Cut only through `drop_socket`.
     drop_connection: Arc<Notify>,
 }
 
@@ -467,8 +466,7 @@ async fn instrument_status_comes_from_refdata() {
     assert!(events.try_recv().is_err());
 }
 
-/// The next socket state of the data client, checked to come from its market data socket.
-async fn next_state(
+async fn next_market_data_state(
     system: &mut UnboundedReceiver<SystemEvent>,
     client_id: ClientId,
 ) -> SocketState {
@@ -496,29 +494,27 @@ async fn socket_state_follows_the_market_data_socket() {
 
     client.connect().await.unwrap();
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
 
     venue.drop_socket();
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Disconnected
     );
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
 
-    // A deliberate disconnect is not a loss.
     client.disconnect().await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(system.try_recv().is_err(), "disconnect reported a state");
 
-    // `close()` built a new socket: it still reports.
     client.connect().await.unwrap();
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
     client.disconnect().await.unwrap();
@@ -551,7 +547,7 @@ async fn reconnect_command_reconnects_the_market_data_socket() {
 
     client.connect().await.unwrap();
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
     let aapl = InstrumentId::from("AAPL-USD-PERP.QFEX");
@@ -570,11 +566,11 @@ async fn reconnect_command_reconnects_the_market_data_socket() {
 
     assert_eq!(request(), SocketReconnectRequestOutcome::Accepted);
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Disconnected
     );
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
     let seen = venue.wait_for_requests(2 * subscribed.len()).await;
@@ -591,19 +587,18 @@ async fn reconnect_command_reconnects_the_market_data_socket() {
         "after disconnect"
     );
 
-    // `close()` built a new socket: the command reaches it too.
     client.connect().await.unwrap();
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
     assert_eq!(request(), SocketReconnectRequestOutcome::Accepted);
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Disconnected
     );
     assert_eq!(
-        next_state(&mut system, client_id).await,
+        next_market_data_state(&mut system, client_id).await,
         SocketState::Connected
     );
     client.disconnect().await.unwrap();

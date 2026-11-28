@@ -39,6 +39,6 @@ Each one is a statement a test can check.
 5. After a `MODIFIED` row, the client order id maps to the new venue order id and the old venue order id maps to nothing.
 6. An order type or time in force the venue lacks (stop limit, trailing stop, GTD, FOK market) is denied before any frame is sent.
 7. Account total = `available_balance + order_margin + position_margin`, locked = `order_margin + position_margin`, currency `USDC`.
-8. When a socket connects, drops and reconnects once, the events for its `(client_id, endpoint)` are `Connected`, `Disconnected`, `Connected` in that order. After `close()` builds a new WebSocket client, that client still publishes through a sink of the same endpoint.
+8. When a socket connects, drops and reconnects once, the events for its `(client_id, endpoint)` are `Connected`, `Disconnected`, `Connected` in that order. After a disconnect builds a new WebSocket client (`Feed::renew_socket`), that client still publishes through a sink of the same endpoint.
 9. Socket state events carry venue `QFEX` and the endpoint of their socket: `market_data` for the market data socket, `trade` for the trade socket.
 10. No secret appears in any `Debug` or `Display` output, log line, or event.

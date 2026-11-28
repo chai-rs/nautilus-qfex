@@ -73,7 +73,6 @@ use crate::{
     },
 };
 
-/// Endpoint label of the trade socket in `SocketStateChanged`.
 const TRADE_ENDPOINT: &str = "trade";
 
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -502,8 +501,6 @@ pub struct QfexExecutionClient {
     shared: Option<Arc<Shared>>,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
-    /// Built on the first `connect`, outside the node's reconnect registry scope: no reconnect
-    /// handler is registered, so a reconnect command answers `Unsupported`.
     socket: Option<SocketControl>,
 }
 

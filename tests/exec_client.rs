@@ -86,7 +86,6 @@ struct VenueState {
 struct Venue {
     state: Arc<Mutex<VenueState>>,
     push: broadcast::Sender<String>,
-    /// Cut only through `drop_socket`.
     drop_connection: Arc<Notify>,
 }
 
@@ -395,7 +394,6 @@ impl Harness {
         Self::start_in(&SocketReconnectRegistry::default(), configure).await
     }
 
-    /// As [`Self::start`], with the client built inside `registry`'s scope, as a `LiveNode` does.
     async fn start_in(
         registry: &SocketReconnectRegistry,
         configure: impl FnOnce(&mut QfexExecClientConfig, &Venue),
@@ -990,8 +988,7 @@ async fn reconnect_logs_in_again_and_catches_up() {
     ));
 }
 
-/// The next socket state of the execution client, checked to come from its trade socket.
-async fn next_state(system: &mut UnboundedReceiver<SystemEvent>) -> SocketState {
+async fn next_trade_state(system: &mut UnboundedReceiver<SystemEvent>) -> SocketState {
     let event = tokio::time::timeout(Duration::from_secs(10), system.recv())
         .await
         .expect("no socket state within 10 s")
@@ -1005,34 +1002,31 @@ async fn next_state(system: &mut UnboundedReceiver<SystemEvent>) -> SocketState 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn socket_state_follows_the_trade_socket() {
-    // The control reads the system event sender when the client first connects.
     let (sender, mut system) = tokio::sync::mpsc::unbounded_channel();
     replace_system_event_sender(sender);
     let registry = SocketReconnectRegistry::default();
     let (mut h, connected) = Harness::start_in(&registry, |_, _| {}).await;
     connected.unwrap();
-    assert_eq!(next_state(&mut system).await, SocketState::Connected);
+    assert_eq!(next_trade_state(&mut system).await, SocketState::Connected);
 
     // Dropped after the login, as `Harness::connect` waits: a drop between the `auth` answer
     // and its handling is `2026-11-27-trade-late-auth-answer`.
     h.venue.wait_frames("subscribe", 1).await;
     h.venue.drop_socket();
-    assert_eq!(next_state(&mut system).await, SocketState::Disconnected);
-    assert_eq!(next_state(&mut system).await, SocketState::Connected);
-    // The client logs in again on the new socket, as before.
+    assert_eq!(
+        next_trade_state(&mut system).await,
+        SocketState::Disconnected
+    );
+    assert_eq!(next_trade_state(&mut system).await, SocketState::Connected);
     h.venue.wait_frames("auth", 2).await;
 
-    // A deliberate disconnect is not a loss.
     h.client.disconnect().await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(system.try_recv().is_err(), "disconnect reported a state");
 
-    // A new trade socket on the next connect still reports.
     h.client.connect().await.unwrap();
-    assert_eq!(next_state(&mut system).await, SocketState::Connected);
+    assert_eq!(next_trade_state(&mut system).await, SocketState::Connected);
 
-    // Built outside the registry scope, the control does not claim reconnect support:
-    // a `LiveNode` answers a reconnect command for this client with `Unsupported`.
     for endpoint in ["trade", "market_data"] {
         assert!(matches!(
             registry.get(client_id(), endpoint.into()),
