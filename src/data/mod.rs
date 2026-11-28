@@ -58,7 +58,6 @@ use crate::{
     },
 };
 
-/// Endpoint label of the market data socket in `SocketStateChanged`.
 const MARKET_DATA_ENDPOINT: &str = "market_data";
 
 /// The venue closes a bar some time after the interval ends.
@@ -268,7 +267,7 @@ impl Feed {
     }
 
     /// Disconnects the socket and forgets every subscription.
-    async fn close(self, ws_url: String) {
+    async fn renew_socket(self, ws_url: String) {
         let mut ws = self.ws.lock().await;
         ws.disconnect().await;
         // The client keeps its recorded subscriptions for the next connect: start a new one
@@ -437,7 +436,8 @@ impl QfexDataClient {
 
     fn stop_in_background(&mut self) {
         self.abort_tasks();
-        self.close_task = Some(get_runtime().spawn(self.feed.clone().close(ws_url(&self.config))));
+        self.close_task =
+            Some(get_runtime().spawn(self.feed.clone().renew_socket(ws_url(&self.config))));
     }
 }
 
@@ -543,7 +543,7 @@ impl DataClient for QfexDataClient {
         if let Some(task) = self.close_task.take() {
             let _ = task.await;
         }
-        self.feed.clone().close(ws_url(&self.config)).await;
+        self.feed.clone().renew_socket(ws_url(&self.config)).await;
         log::info!("Disconnected QFEX data client {}", self.client_id);
         Ok(())
     }

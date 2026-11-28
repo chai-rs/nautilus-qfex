@@ -350,7 +350,6 @@ pub struct QfexWebSocketClient {
     task: Option<JoinHandle<()>>,
     pump: Option<JoinHandle<()>>,
     state_sink: Option<SocketStateSink>,
-    /// The live transport's reconnect handle, shared with [`Self::reconnect_request`].
     reconnect: Arc<parking_lot::Mutex<Option<WebSocketReconnectHandle>>>,
 }
 
