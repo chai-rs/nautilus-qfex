@@ -1,0 +1,2 @@
+# probe-h5.patch on top of check.patch; 20 runs of loop B; PROBE lines in order, per run
+     20 PROBE forward Authenticated epoch=0 live=1|PROBE forward Reconnected epoch=1 live=1|test result: FAILED. 0 passed|

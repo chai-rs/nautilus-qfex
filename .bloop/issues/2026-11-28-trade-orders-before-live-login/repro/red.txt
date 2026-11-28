@@ -1,0 +1,52 @@
+# Red output, 2026-11-28, throwaway worktree at origin/main 4134e4c (PR #16 merged), the two added tests only
+# command: cargo test --lib -- trade_order_sent_during trade_late_auth_answer_is_not
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (/home/user/nautilus-qfex/target-debug-orders/debug/deps/nautilus_qfex-0407fb27e789ca5d)
+running 2 tests
+test websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket ... FAILED
+test websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth ... FAILED
+failures:
+---- websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket stdout ----
+thread 'websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket' (11867) panicked at src/websocket/client.rs:1382:9:
+the answer of a closed connection reached the stream as a login: [Subscribed, Authenticated]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+---- websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth stdout ----
+thread 'websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth' (11868) panicked at src/websocket/client.rs:1344:9:
+assertion `left == right` failed: the order reaches the next socket only after that socket's own auth
+  left: [String("add_order"), String("auth"), String("subscribe")]
+ right: [String("auth"), String("subscribe"), String("add_order")]
+failures:
+    websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket
+    websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.75s
+error: test failed, to rerun pass `--lib`
+
+# rate: 20 runs of each test binary filter
+loop A (trade_order_sent_during...) red 20/20; loop B (trade_late_auth_answer_is_not...) red 20/20
+
+# whole unit suite with the two tests added: cargo test --lib
+test websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket ... FAILED
+test websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth ... FAILED
+thread 'websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket' (12015) panicked at src/websocket/client.rs:1382:9:
+the answer of a closed connection reached the stream as a login: [Subscribed, Authenticated]
+thread 'websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth' (12017) panicked at src/websocket/client.rs:1344:9:
+  left: [String("add_order"), String("auth"), String("subscribe")]
+ right: [String("auth"), String("subscribe"), String("add_order")]
+test result: FAILED. 146 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.32s
+
+# loop A unforced (evidence/loop-a-unforced.patch on top of evidence/check.patch): the read loop is not held at RECONNECTED
+# 50 runs of: cargo test --lib trade_order_unforced; frames the second socket received in red runs
+     46   [add_order, auth, subscribe]
+      4   [auth, add_order, subscribe]
+red 50/50
+
+# The check as saved (repro/src/websocket/client.rs.txt, after cargo fmt; evidence/check.patch is the same diff), no probe, unfixed code at 4134e4c
+# cargo test --lib (whole unit suite)
+test websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket ... FAILED
+test websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth ... FAILED
+thread 'websocket::client::tests::trade_late_auth_answer_is_not_a_login_of_the_next_socket' (29674) panicked at src/websocket/client.rs:1386:9:
+the answer of a closed connection reached the stream as a login: [Subscribed, Authenticated]
+thread 'websocket::client::tests::trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth' (29676) panicked at src/websocket/client.rs:1344:9:
+  left: [String("add_order"), String("auth"), String("subscribe")]
+ right: [String("auth"), String("subscribe"), String("add_order")]
+test result: FAILED. 146 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.31s

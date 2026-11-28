@@ -1,0 +1,5 @@
+# probe-h6.patch on top of check.patch, 20 runs of trade_logged_in_probe_bloop_debug
+without the H4 probe:
+     20 logged_in=Ok(()) live_epoch=1 socket2_frames=[] then=["Reconnected", ""]
+with probe-h4.patch added too:
+     20 logged_in=Ok(()) live_epoch=1 socket2_frames=[String("auth"), String("subscribe")] then=["", ""]

@@ -1,0 +1,12 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -686,6 +686,9 @@
+             }
+         };
+ 
++        if matches!(message, QfexWsMessage::Authenticated) && epoch != client.connection_epoch() {
++            continue; // bloop-debug-2026-11-28-trade-orders-before-live-login
++        }
+         match &message {
+             QfexWsMessage::Authenticated => send_session_frames(&client, &session, epoch).await,
+             QfexWsMessage::Subscribed => session.gate.acknowledged().await,

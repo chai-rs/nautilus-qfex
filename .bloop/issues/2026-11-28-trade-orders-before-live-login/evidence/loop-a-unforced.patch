@@ -1,0 +1,49 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -1351,6 +1351,46 @@
+     }
+ 
+     #[tokio::test]
++    async fn trade_order_unforced_bloop_debug_2026_11_28_trade_orders_before_live_login() {
++        let (venue, url) = MockVenue::start().await;
++        let mut client = QfexWebSocketClient::new_trade(&url, fixed_signer(), false).unwrap();
++        let mut rx = client.connect().await.unwrap();
++        assert!(matches!(next(&mut rx).await, QfexWsMessage::Authenticated));
++        wait_until("the first session", || venue.requests(1).len() == 2).await;
++        let socket = client.client.clone().unwrap();
++
++        let next_upgrade_held = venue.next_upgrade_gate.lock().await;
++        // bloop-debug-2026-11-28-trade-orders-before-live-login: no read loop hold
++        venue.drop_connection.notify_one();
++        wait_until("the reconnect", || !socket.is_active()).await;
++
++        let order = add_order();
++        let (sent, ()) = tokio::join!(client.send(&order), async {
++            drop(next_upgrade_held);
++            wait_until("the next socket", || {
++                venue.connections.load(Ordering::SeqCst) == 2 && socket.is_active()
++            })
++            .await;
++        });
++        sent.unwrap();
++
++        wait_until("the second session", || venue.requests(2).len() >= 3).await;
++        tokio::time::sleep(Duration::from_millis(200)).await;
++        let kinds: Vec<Value> = venue
++            .requests(2)
++            .iter()
++            .map(|frame| frame["type"].clone())
++            .collect();
++        assert_eq!(
++            kinds,
++            [json!("auth"), json!("subscribe"), json!("add_order")],
++            "the order reaches the next socket only after that socket's own auth"
++        );
++        assert_eq!(venue.requests(1).len(), 2, "the order did not go out on the first socket");
++        client.disconnect().await;
++    }
++
++    #[tokio::test]
+     async fn trade_late_auth_answer_is_not_a_login_of_the_next_socket() {
+         let (venue, url) = MockVenue::start().await;
+         venue

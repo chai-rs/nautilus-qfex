@@ -1,0 +1,71 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -69,6 +69,7 @@
+     subscriptions: Subscriptions,
+     /// Market data socket: paces the live subscribe path.
+     gate: Arc<SubscribeGate>,
++    login: Arc<tokio::sync::watch::Sender<Option<u64>>>, // bloop-debug-2026-11-28-trade-orders-before-live-login
+ }
+ 
+ /// One outgoing market data frame: one channel and every symbol of it.
+@@ -375,6 +376,7 @@
+                 frames: Arc::default(),
+                 subscriptions: Arc::default(),
+                 gate: Arc::default(),
++                login: Arc::new(tokio::sync::watch::channel(None).0), // bloop-debug-2026-11-28-trade-orders-before-live-login
+             },
+             client: None,
+             task: None,
+@@ -441,6 +443,7 @@
+                 frames: Arc::new(frames),
+                 subscriptions: Arc::default(),
+                 gate: Arc::default(),
++                login: Arc::new(tokio::sync::watch::channel(None).0), // bloop-debug-2026-11-28-trade-orders-before-live-login
+             },
+             client: None,
+             task: None,
+@@ -575,7 +578,21 @@
+             .client
+             .as_ref()
+             .ok_or_else(|| QfexWsClientError::Client("not connected".to_string()))?;
+-        Ok(client.send_text(request.to_frame(), None).await?)
++        // bloop-debug-2026-11-28-trade-orders-before-live-login
++        let mut login = self.session.login.subscribe();
++        let epoch = loop {
++            let seen = *login.borrow_and_update();
++            if let Some(epoch) = seen
++                && client.is_active()
++                && epoch == client.connection_epoch()
++            {
++                break epoch;
++            }
++            let _ = tokio::time::timeout(Duration::from_millis(20), login.changed()).await;
++        };
++        Ok(client
++            .send_text_on_connection(request.to_frame(), None, epoch)
++            .await?)
+     }
+ }
+ 
+@@ -668,6 +685,7 @@
+         };
+ 
+         if text.as_str() == RECONNECTED {
++            session.login.send_replace(None); // bloop-debug-2026-11-28-trade-orders-before-live-login
+             session.gate.connection_lost().await;
+             if out_tx.send(QfexWsMessage::Reconnected).is_err() {
+                 return;
+@@ -687,7 +705,12 @@
+         };
+ 
+         match &message {
+-            QfexWsMessage::Authenticated => send_session_frames(&client, &session, epoch).await,
++            QfexWsMessage::Authenticated => {
++                send_session_frames(&client, &session, epoch).await;
++                if epoch == client.connection_epoch() {
++                    session.login.send_replace(Some(epoch)); // bloop-debug-2026-11-28-trade-orders-before-live-login
++                }
++            }
+             QfexWsMessage::Subscribed => session.gate.acknowledged().await,
+             QfexWsMessage::Error(error) => session.gate.refused(&error.incoming_message).await,
+             _ => {}

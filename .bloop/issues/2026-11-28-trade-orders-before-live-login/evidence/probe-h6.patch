@@ -1,0 +1,52 @@
+diff --git a/src/execution/mod.rs b/src/execution/mod.rs
+index ee06787..93366b8 100644
+--- a/src/execution/mod.rs
++++ b/src/execution/mod.rs
+@@ -396,7 +396,7 @@ impl Shared {
+ }
+ 
+ /// Waits for the answer to the `auth` frame that `connect` sent.
+-async fn logged_in(rx: &mut UnboundedReceiver<QfexWsMessage>) -> anyhow::Result<()> {
++pub(crate) async fn logged_in(rx: &mut UnboundedReceiver<QfexWsMessage>) -> anyhow::Result<()> { // bloop-debug-2026-11-28-trade-orders-before-live-login
+     let answer = async {
+         loop {
+             match rx.recv().await {
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -1390,6 +1390,36 @@
+     }
+ 
+     #[tokio::test]
++    async fn trade_logged_in_probe_bloop_debug() {
++        let (venue, url) = MockVenue::start().await;
++        venue
++            .defer_first_auth_then_drop
++            .store(true, Ordering::SeqCst);
++        let states = Arc::new(parking_lot::Mutex::new(Vec::new()));
++        let seen = states.clone();
++        let mut client = QfexWebSocketClient::new_trade(&url, fixed_signer(), false)
++            .unwrap()
++            .with_state_sink(SocketStateSink::new(move |state| seen.lock().push(state)));
++        let mut rx = client.connect().await.unwrap();
++        wait_until("the first auth", || venue.requests(1).len() == 1).await;
++
++        let read_loop_held_at_subscribe_gate = client.session.gate.state.lock().await;
++        venue.release_acks.notify_one();
++        wait_until("the next socket", || {
++            venue.connections.load(Ordering::SeqCst) == 2 && states.lock().len() == 3
++        })
++        .await;
++        drop(read_loop_held_at_subscribe_gate);
++
++        // bloop-debug-2026-11-28-trade-orders-before-live-login
++        let login = crate::execution::logged_in(&mut rx).await;
++        let after: Vec<String> = (0..2).map(|_| rx.try_recv().map(|m| format!("{m:?}")).unwrap_or_default()).collect();
++        let next_two = after;
++        eprintln!("PROBE logged_in={login:?} live_epoch={} socket2_frames={:?} then={next_two:?}", client.client.as_ref().unwrap().connection_epoch(), venue.requests(2).iter().map(|f| f["type"].clone()).collect::<Vec<_>>());
++        client.disconnect().await;
++    }
++
++    #[tokio::test]
+     async fn send_without_a_connection_is_an_error() {
+         let client =
+             QfexWebSocketClient::new_trade("ws://127.0.0.1:1/ws", fixed_signer(), false).unwrap();

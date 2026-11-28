@@ -1,0 +1,6 @@
+# probe-h3.patch on top of check.patch + loop-a-unforced.patch, 20 runs each, frame types per socket
+loop A (trade_order_sent_during...):
+     20 socket 1: ["auth", "subscribe"]  socket 2: ["add_order", "auth", "subscribe"]
+loop A unforced (trade_order_unforced...):
+     19 socket 1: ["auth", "subscribe"]  socket 2: ["add_order", "auth", "subscribe"]
+      1 socket 1: ["auth", "subscribe"]  socket 2: ["auth", "add_order", "subscribe"]

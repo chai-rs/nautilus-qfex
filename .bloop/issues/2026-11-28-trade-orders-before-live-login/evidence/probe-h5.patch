@@ -1,0 +1,20 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -668,6 +668,7 @@
+         };
+ 
+         if text.as_str() == RECONNECTED {
++            eprintln!("PROBE forward Reconnected epoch={epoch} live={}", client.connection_epoch()); // bloop-debug-2026-11-28-trade-orders-before-live-login
+             session.gate.connection_lost().await;
+             if out_tx.send(QfexWsMessage::Reconnected).is_err() {
+                 return;
+@@ -686,6 +687,9 @@
+             }
+         };
+ 
++        if matches!(message, QfexWsMessage::Authenticated) {
++            eprintln!("PROBE forward Authenticated epoch={epoch} live={}", client.connection_epoch()); // bloop-debug-2026-11-28-trade-orders-before-live-login
++        }
+         match &message {
+             QfexWsMessage::Authenticated => send_session_frames(&client, &session, epoch).await,
+             QfexWsMessage::Subscribed => session.gate.acknowledged().await,
