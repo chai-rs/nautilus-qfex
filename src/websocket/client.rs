@@ -738,6 +738,7 @@ mod tests {
         /// Channel name to refuse once, with the frame echoed in `incoming_message`.
         refuse: Arc<parking_lot::Mutex<Option<String>>>,
         defer_first_auth_then_drop: Arc<AtomicBool>,
+        next_upgrade_gate: Arc<Mutex<()>>,
     }
 
     impl MockVenue {
@@ -751,6 +752,7 @@ mod tests {
                             |ws: WebSocketUpgrade,
                              uri: axum::http::Uri,
                              State(venue): State<Self>| async move {
+                                drop(venue.next_upgrade_gate.lock().await);
                                 venue
                                     .queries
                                     .lock()
@@ -1185,6 +1187,59 @@ mod tests {
             venue.requests(2).is_empty(),
             "nothing went out on the second socket"
         );
+        client.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn trade_auth_for_a_connection_replaced_while_waiting_is_not_sent_and_the_next_logs_in() {
+        let (venue, url) = MockVenue::start().await;
+        let states = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let seen = states.clone();
+        let mut client = QfexWebSocketClient::new_trade(&url, fixed_signer(), false)
+            .unwrap()
+            .with_state_sink(SocketStateSink::new(move |state| seen.lock().push(state)));
+        let mut rx = client.connect().await.unwrap();
+        assert!(matches!(next(&mut rx).await, QfexWsMessage::Authenticated));
+        wait_until("the first session", || venue.requests(1).len() == 2).await;
+        let socket = client.client.clone().unwrap();
+
+        let next_upgrade_held = venue.next_upgrade_gate.lock().await;
+        venue.drop_connection.notify_one();
+        wait_until("the reconnect", || !socket.is_active()).await;
+        assert_eq!(socket.connection_epoch(), 0);
+        let session = client.session.clone();
+        let waiting = socket.clone();
+        let auth = tokio::spawn(async move { start_session(&waiting, &session, 0).await });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !auth.is_finished(),
+            "the auth did not wait for the next connection"
+        );
+        drop(next_upgrade_held);
+
+        assert!(
+            auth.await.unwrap().is_ok(),
+            "a replaced connection is handed to the next one"
+        );
+        loop {
+            if matches!(next(&mut rx).await, QfexWsMessage::Reconnected) {
+                break;
+            }
+        }
+        assert!(matches!(next(&mut rx).await, QfexWsMessage::Authenticated));
+        wait_until("the second session", || venue.requests(2).len() >= 2).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let kinds: Vec<Value> = venue
+            .requests(2)
+            .iter()
+            .map(|frame| frame["type"].clone())
+            .collect();
+        assert_eq!(
+            kinds,
+            [json!("auth"), json!("subscribe")],
+            "the next socket gets its own auth only, and the session frames once"
+        );
+        assert_eq!(socket.connection_epoch(), 1);
         client.disconnect().await;
     }
 
