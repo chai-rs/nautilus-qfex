@@ -9,17 +9,18 @@ use nautilus_model::{
     types::Quantity,
 };
 use nautilus_qfex::{
-    common::{consts::QFEX, enums::QfexEnvironment},
+    common::{consts::QFEX, enums::QfexEnvironment, parse::instrument_id_of},
     config::{data::QfexDataClientConfig, exec::QfexExecClientConfig},
     factories::{data::QfexDataClientFactory, exec::QfexExecutionClientFactory},
 };
 use nautilus_testkit::testers::{ExecTester, ExecTesterConfig};
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 // A stock perpetual: it only trades in its market hours.
-const INSTRUMENT_ID: &str = "AAPL-USD-PERP.QFEX";
+const DEFAULT_INSTRUMENT_ID: &str = "AAPL-USD-PERP.QFEX";
 // AAPL-USD: lot size 0.001, minimum order size 0.01.
-const ORDER_QTY: &str = "0.010";
+const DEFAULT_ORDER_QTY: Decimal = dec!(0.010);
 const RECORDINGS_DIR: &str = "recordings";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,26 +43,18 @@ impl UatStep {
         Self::DropWithOpenOrder,
     ];
 
-    fn from_args(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
-        let (Some(step), None) = (args.next(), args.next()) else {
-            return Err(Self::usage());
-        };
-        Self::ALL
-            .into_iter()
-            .find(|candidate| (*candidate as u8).to_string() == step)
-            .ok_or_else(|| format!("unknown step '{step}'\n{}", Self::usage()))
-    }
-
     fn usage() -> String {
         let steps: String = Self::ALL
             .iter()
             .map(|step| format!("\n  {}  {}", *step as u8, step.what_it_does()))
             .collect();
         format!(
-            "usage: cargo run --example exec_tester --features examples -- <step>\n\
+            "usage: cargo run --example exec_tester --features examples -- <step> [SYMBOL QTY]\n\
              Runs one step of \"The UAT gate\" in docs/STATUS.md on QFEX UAT with \
              QFEX_UAT_API_KEY and QFEX_UAT_API_SECRET, and records it to \
-             recordings/uat-step-<step>.jsonl. Stop it with Ctrl-C.{steps}"
+             recordings/uat-step-<step>.jsonl. Stop it with Ctrl-C. SYMBOL and QTY name \
+             the instrument and the order size, for example GOLD-USD 0.001; without them \
+             the tester trades {DEFAULT_ORDER_QTY} AAPL-USD.{steps}"
         )
     }
 
@@ -96,32 +89,89 @@ impl UatStep {
         };
         (data, exec)
     }
+}
 
-    fn tester_config(self) -> Result<ExecTesterConfig, Box<dyn std::error::Error>> {
-        let instrument_id = InstrumentId::from(INSTRUMENT_ID);
+#[derive(Debug)]
+struct UatRun {
+    step: UatStep,
+    instrument_id: InstrumentId,
+    order_qty: Decimal,
+}
+
+impl UatRun {
+    fn from_args(args: impl Iterator<Item = String>) -> Result<Self, String> {
+        let args: Vec<String> = args.collect();
+        let refuse = |why: String| format!("{why}\n{}", UatStep::usage());
+        let (step, instrument) = match args.as_slice() {
+            [step] => (step, None),
+            [step, symbol, qty] => (step, Some((symbol, qty))),
+            _ => return Err(UatStep::usage()),
+        };
+        let step = UatStep::ALL
+            .into_iter()
+            .find(|candidate| (*candidate as u8).to_string() == *step)
+            .ok_or_else(|| refuse(format!("unknown step '{step}'")))?;
+        let Some((symbol, qty)) = instrument else {
+            return Ok(Self {
+                step,
+                instrument_id: InstrumentId::from(DEFAULT_INSTRUMENT_ID),
+                order_qty: DEFAULT_ORDER_QTY,
+            });
+        };
+        let venue_symbol = symbol.contains('-')
+            && symbol
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-');
+        if !venue_symbol {
+            return Err(refuse(format!(
+                "'{symbol}' is not a QFEX symbol such as GOLD-USD"
+            )));
+        }
+        let instrument_id = instrument_id_of(symbol).map_err(|e| refuse(e.to_string()))?;
+        let order_qty = qty
+            .parse::<Decimal>()
+            .ok()
+            .filter(|qty| qty.is_sign_positive() && !qty.is_zero())
+            .ok_or_else(|| refuse(format!("'{qty}' is not a positive quantity")))?;
+        Ok(Self {
+            step,
+            instrument_id,
+            order_qty,
+        })
+    }
+
+    fn tester_config(&self) -> Result<ExecTesterConfig, Box<dyn std::error::Error>> {
+        let Self {
+            step,
+            instrument_id,
+            order_qty,
+        } = *self;
         let limit_buy = matches!(
-            self,
-            Self::Login | Self::SubmitAndCancel | Self::Modify | Self::DropWithOpenOrder
+            step,
+            UatStep::Login
+                | UatStep::SubmitAndCancel
+                | UatStep::Modify
+                | UatStep::DropWithOpenOrder
         );
         let mut config = ExecTesterConfig::builder()
             .instrument_id(instrument_id)
             .client_id(ClientId::new(QFEX))
-            .order_qty(Quantity::from(ORDER_QTY))
-            .dry_run(self == Self::Login)
+            .order_qty(Quantity::from(order_qty.to_string().as_str()))
+            .dry_run(step == UatStep::Login)
             .subscribe_quotes(true)
             .subscribe_trades(false)
             .subscribe_book(false)
             .enable_limit_buys(limit_buy)
             .enable_limit_sells(false)
-            .enable_stop_buys(self == Self::StopOrder)
+            .enable_stop_buys(step == UatStep::StopOrder)
             .enable_stop_sells(false)
             .stop_order_type(OrderType::StopMarket)
             .tob_offset_ticks(100)
             .use_post_only(true)
-            .modify_orders_to_maintain_tob_offset(self == Self::Modify)
-            .trigger_limit_order_maintenance_once(self == Self::Modify)
-            .maybe_open_position_on_start_qty((self == Self::MarketFill).then_some(dec!(0.010)))
-            .open_position_on_first_quote(self == Self::MarketFill)
+            .modify_orders_to_maintain_tob_offset(step == UatStep::Modify)
+            .trigger_limit_order_maintenance_once(step == UatStep::Modify)
+            .maybe_open_position_on_start_qty((step == UatStep::MarketFill).then_some(order_qty))
+            .open_position_on_first_quote(step == UatStep::MarketFill)
             .cancel_orders_on_stop(true)
             .close_positions_on_stop(true)
             .log_data(false)
@@ -134,23 +184,25 @@ impl UatStep {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let step = match UatStep::from_args(std::env::args().skip(1)) {
-        Ok(step) => step,
+    let run = match UatRun::from_args(std::env::args().skip(1)) {
+        Ok(run) => run,
         Err(usage) => {
             eprintln!("{usage}");
             std::process::exit(2);
         }
     };
     println!(
-        "QFEX UAT step {}: {}. Stop with Ctrl-C.",
-        step as u8,
-        step.what_it_does()
+        "QFEX UAT step {}: {}, {} {}. Stop with Ctrl-C.",
+        run.step as u8,
+        run.step.what_it_does(),
+        run.order_qty,
+        run.instrument_id
     );
-    let (data_config, exec_config) = step.client_configs();
-    let tester_config = step.tester_config()?;
+    let (data_config, exec_config) = run.step.client_configs();
+    let tester_config = run.tester_config()?;
+    let instrument_id = run.instrument_id;
     std::fs::create_dir_all(RECORDINGS_DIR)?;
 
-    let instrument_id = InstrumentId::from(INSTRUMENT_ID);
     let log_config = LoggerConfig {
         stdout_level: LevelFilter::Info,
         ..Default::default()
@@ -205,10 +257,38 @@ mod tests {
     #[case(&["three"])]
     #[case(&["mainnet"])]
     #[case(&["3", "mainnet"])]
-    fn no_step_an_unknown_step_or_mainnet_is_refused(#[case] list: &[&str]) {
-        let usage = UatStep::from_args(args(list)).unwrap_err();
+    #[case(&["3", "mainnet", "1"])]
+    #[case(&["3", "GOLD-USD"])]
+    #[case(&["3", "GOLD-USD", "0"])]
+    #[case(&["3", "GOLD-USD", "-0.001"])]
+    #[case(&["3", "GOLD-USD", "lots"])]
+    #[case(&["3", "GOLD-USD", "0.001", "extra"])]
+    fn no_step_an_unknown_step_a_bad_instrument_or_mainnet_is_refused(#[case] list: &[&str]) {
+        let usage = UatRun::from_args(args(list)).unwrap_err();
         assert!(usage.contains("QFEX UAT"), "{usage}");
         assert!(usage.contains("drop the network by hand"), "{usage}");
+    }
+
+    #[test]
+    fn the_instrument_defaults_to_aapl_and_can_be_named_with_its_quantity() {
+        let default = UatRun::from_args(args(&["3"])).unwrap();
+        assert_eq!(
+            default.instrument_id,
+            InstrumentId::from("AAPL-USD-PERP.QFEX")
+        );
+        assert_eq!(default.order_qty, dec!(0.010));
+
+        let gold = UatRun::from_args(args(&["5", "GOLD-USD", "0.001"])).unwrap();
+        assert_eq!(gold.step, UatStep::MarketFill);
+        assert_eq!(gold.instrument_id, InstrumentId::from("GOLD-USD-PERP.QFEX"));
+        let config = gold.tester_config().unwrap();
+        assert_eq!(config.instrument_id, gold.instrument_id);
+        assert_eq!(config.order_qty, Quantity::from("0.001"));
+        assert_eq!(config.open_position_on_start_qty, Some(dec!(0.001)));
+        assert_eq!(
+            config.base.external_order_instrument_ids,
+            Some(vec![gold.instrument_id])
+        );
     }
 
     #[rstest]
@@ -222,7 +302,8 @@ mod tests {
         #[case] number: u8,
         #[case] step: UatStep,
     ) {
-        assert_eq!(UatStep::from_args(args(&[&number.to_string()])), Ok(step));
+        let run = UatRun::from_args(args(&[&number.to_string()])).unwrap();
+        assert_eq!(run.step, step);
         let (data, exec) = step.client_configs();
         assert_eq!(data.environment, QfexEnvironment::Uat);
         assert_eq!(exec.environment, QfexEnvironment::Uat);
@@ -239,33 +320,37 @@ mod tests {
 
     #[test]
     fn each_step_drives_the_tester_the_way_the_gate_needs() {
-        let login = UatStep::Login.tester_config().unwrap();
+        let config = |step: &str| {
+            let run = UatRun::from_args(args(&[step])).unwrap();
+            run.tester_config().unwrap()
+        };
+        let login = config("2");
         assert!(login.dry_run);
 
-        let submit = UatStep::SubmitAndCancel.tester_config().unwrap();
+        let submit = config("3");
         assert!(!submit.dry_run && submit.use_post_only);
         assert!(submit.enable_limit_buys && !submit.enable_limit_sells);
         assert!(submit.cancel_orders_on_stop);
         assert!(!submit.modify_orders_to_maintain_tob_offset);
 
-        let modify = UatStep::Modify.tester_config().unwrap();
+        let modify = config("4");
         assert!(modify.enable_limit_buys && modify.use_post_only);
         assert!(modify.modify_orders_to_maintain_tob_offset);
         assert!(modify.trigger_limit_order_maintenance_once);
 
-        let market = UatStep::MarketFill.tester_config().unwrap();
+        let market = config("5");
         assert!(!market.enable_limit_buys && !market.enable_limit_sells);
         assert_eq!(market.open_position_on_start_qty, Some(dec!(0.010)));
         assert!(market.open_position_on_first_quote);
         assert!(market.close_positions_on_stop);
 
-        let stop = UatStep::StopOrder.tester_config().unwrap();
+        let stop = config("6");
         assert!(!stop.enable_limit_buys && !stop.enable_limit_sells);
         assert!(stop.enable_stop_buys && !stop.enable_stop_sells);
         assert_eq!(stop.stop_order_type, OrderType::StopMarket);
         assert!(stop.cancel_orders_on_stop);
 
-        let drop = UatStep::DropWithOpenOrder.tester_config().unwrap();
+        let drop = config("7");
         assert!(drop.enable_limit_buys && drop.use_post_only && !drop.dry_run);
     }
 }

@@ -29,8 +29,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 197 passed, 0 failed: 155 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 13 `exec_tester`, 5 data client, 14 execution client (28 Nov 2026, Linux, with the login answer recorded on UAT; 193 before it; 180 with the recording only; 174 before it; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | 184 passed: the same less the 13 `exec_tester` tests, which need the `examples` feature |
+| `cargo test --features examples` | 204 passed, 0 failed: 155 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 20 `exec_tester`, 5 data client, 14 execution client (28 Nov 2026, Linux, with the instrument argument of `exec_tester`; 197 before it, with the login answer recorded on UAT; 193 before that; 180 with the recording only; 174 before it; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | 184 passed: the same less the 20 `exec_tester` tests, which need the `examples` feature |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
@@ -308,7 +308,10 @@ Results so far (28 Nov 2026, UAT, `exec_tester` from branch `test/2026-11-27-uat
 Each command reads `QFEX_UAT_API_KEY` and `QFEX_UAT_API_SECRET` from the environment; set
 them in your shell, never in a file of the repository. `exec_tester` runs on UAT only and
 writes `recordings/uat-step-<step>.jsonl`, which git ignores. Stop it with Ctrl-C. The tester
-trades `AAPL-USD-PERP.QFEX`, which trades in its market hours only.
+trades 0.010 `AAPL-USD-PERP.QFEX`, which trades in its market hours only. Two more arguments
+name another symbol and its order size, for example `-- 3 GOLD-USD 0.001`. UAT lists no
+crypto; every symbol has market hours, and on Saturday all of them are in their `weekend`
+session.
 
 | Step | Command | What it does |
 |---|---|---|
