@@ -1,5 +1,5 @@
 WAITING: none
-STOPPED: none
+STOPPED: done
 
 ## Runs
 
@@ -12,6 +12,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | 3 | 2026-11-28T07:05Z | 4 | build | planned | built | 1 slice green, 171 tests as written; draft PR #17 |
 | 4 | 2026-11-28T07:12Z | 5 | review | built | approved | code PASS (0 must, 0 should); approver APPROVE, spot check criterion 5 with a mutation |
 | 5 | 2026-11-28T07:30Z | 6 | deliver | approved | merged | synced, gate 171 passed; merged as `d779309` on the user's "merge ให้หน่อย"; worktree removed on the user's yes |
+| 6 | 2026-11-28T07:45Z | 6 | retro | merged | done | 4 lessons; opened `2026-11-28-gate-tests-its-own-tree`; archive refused off `main`, waits for the records PR |
 
 ## Answered by trust level
 
@@ -27,3 +28,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 ## Stops
 
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
+2026-11-28T07:45Z done: retro wrote retro.md; archiving waits until the records PR merges
