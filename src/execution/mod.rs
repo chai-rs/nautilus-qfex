@@ -10,6 +10,7 @@ mod trade_socket;
 use std::{
     collections::{HashMap, VecDeque},
     future::Future,
+    path::Path,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -44,6 +45,7 @@ use nautilus_model::{
 use parking_lot::Mutex;
 use rust_decimal::Decimal;
 use tokio::{
+    io::AsyncWriteExt,
     sync::{RwLock, mpsc::UnboundedReceiver, oneshot},
     task::JoinHandle,
 };
@@ -52,7 +54,10 @@ use ustr::Ustr;
 
 use self::{dispatch::OrderDispatch, order::is_stop, trade_socket::StateOnlyTradeSocketControl};
 use crate::{
-    common::{credential::QfexCredential, parse::venue_symbol_of, urls::qfex_trade_ws_url},
+    common::{
+        credential::QfexCredential, parse::venue_symbol_of, recording::QfexRecorder,
+        urls::qfex_trade_ws_url,
+    },
     config::exec::QfexExecClientConfig,
     http::{
         client::{MAX_PAGE_LIMIT, QfexHttpClient, QfexUserQuery},
@@ -486,6 +491,53 @@ async fn consume(
     shared.ws.write().await.disconnect().await;
 }
 
+async fn start_recording(path: &Path) -> anyhow::Result<(QfexRecorder, Recording)> {
+    let file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .with_context(|| format!("QFEX recording file {} not opened", path.display()))?;
+    let (recorder, lines) = QfexRecorder::channel();
+    let stop = CancellationToken::new();
+    let task = spawn(write_lines_until_closed(file, lines, stop.clone()));
+    Ok((recorder, Recording { stop, task }))
+}
+
+async fn write_lines_until_closed(
+    mut file: tokio::fs::File,
+    mut lines: UnboundedReceiver<String>,
+    stop: CancellationToken,
+) {
+    let mut stopping = false;
+    loop {
+        let line = tokio::select! {
+            () = stop.cancelled(), if !stopping => {
+                lines.close();
+                stopping = true;
+                continue;
+            }
+            line = lines.recv() => line,
+        };
+        let Some(line) = line else { break };
+        if let Err(e) = append_line_flushed(&mut file, &line).await {
+            log::error!("QFEX recording stopped, a line was not written: {e}");
+            return;
+        }
+    }
+}
+
+async fn append_line_flushed(file: &mut tokio::fs::File, line: &str) -> std::io::Result<()> {
+    file.write_all(format!("{line}\n").as_bytes()).await?;
+    file.flush().await
+}
+
+#[derive(Debug)]
+struct Recording {
+    stop: CancellationToken,
+    task: JoinHandle<()>,
+}
+
 /// Live execution client for QFEX.
 #[derive(Debug)]
 pub struct QfexExecutionClient {
@@ -496,6 +548,7 @@ pub struct QfexExecutionClient {
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
     trade_socket_control: StateOnlyTradeSocketControl,
+    recording: Option<Recording>,
 }
 
 impl QfexExecutionClient {
@@ -520,6 +573,7 @@ impl QfexExecutionClient {
             cancel: CancellationToken::new(),
             tasks: Vec::new(),
             trade_socket_control: StateOnlyTradeSocketControl::built_on_first_connect(),
+            recording: None,
         })
     }
 
@@ -728,7 +782,7 @@ impl ExecutionClient for QfexExecutionClient {
         )?
         .context("QFEX execution needs an API key and secret")?;
         let signer = QfexSigner::new(credential);
-        let http = QfexHttpClient::new(
+        let mut http = QfexHttpClient::new(
             config.environment,
             config.base_url_http.clone(),
             config.api_version.clone(),
@@ -736,6 +790,14 @@ impl ExecutionClient for QfexExecutionClient {
             config.proxy_url.clone(),
             Some(signer.clone()),
         )?;
+        let mut recorder = None;
+        let mut recording = None;
+        if let Some(path) = &config.record_path {
+            let (handle, started) = start_recording(path).await?;
+            http = http.with_recorder(handle.clone());
+            recorder = Some(handle);
+            recording = Some(started);
+        }
 
         let mut instruments = HashMap::new();
         for instrument in http.request_instruments().await? {
@@ -753,6 +815,9 @@ impl ExecutionClient for QfexExecutionClient {
         let client_id = self.core.client_id;
         let mut ws = QfexWebSocketClient::new_trade(&url, signer, config.cancel_on_disconnect)?
             .with_state_sink(self.trade_socket_control.sink(client_id));
+        if let Some(recorder) = recorder {
+            ws = ws.with_recorder(recorder);
+        }
         let caught_up_ns = AtomicU64::new(now().as_u64());
         let mut rx = ws.connect().await?;
         if let Err(e) = logged_in(&mut rx).await {
@@ -781,6 +846,7 @@ impl ExecutionClient for QfexExecutionClient {
         self.cancel = CancellationToken::new();
         self.tasks = vec![spawn(consume(shared.clone(), rx, self.cancel.clone()))];
         self.shared = Some(shared);
+        self.recording = recording;
         self.core.set_connected();
         log::info!("Connected QFEX execution client {}", self.core.client_id);
         Ok(())
@@ -797,6 +863,15 @@ impl ExecutionClient for QfexExecutionClient {
             }
         }
         self.shared = None;
+        if let Some(Recording { stop, mut task }) = self.recording.take() {
+            stop.cancel();
+            if tokio::time::timeout(DISCONNECT_TIMEOUT, &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+            }
+        }
         self.core.set_disconnected();
         Ok(())
     }

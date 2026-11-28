@@ -28,6 +28,7 @@ use crate::{
         consts::QFEX_API_VERSION,
         enums::{QfexBarInterval, QfexEnvironment, QfexSymbolStatus},
         parse::venue_symbol_of,
+        recording::QfexRecorder,
         urls::qfex_http_base_url,
     },
     http::{
@@ -129,6 +130,7 @@ pub struct QfexHttpClient {
     client: HttpClient,
     retry_manager: RetryManager<QfexHttpError>,
     signer: Option<QfexSigner>,
+    recorder: Option<QfexRecorder>,
 }
 
 impl QfexHttpClient {
@@ -166,7 +168,16 @@ impl QfexHttpClient {
                 .build()?,
             retry_manager: create_http_retry_manager(),
             signer,
+            recorder: None,
         })
+    }
+
+    /// Hands every answer, error answers and retries included, to `recorder`. Never the
+    /// request headers.
+    #[must_use]
+    pub fn with_recorder(mut self, recorder: QfexRecorder) -> Self {
+        self.recorder = Some(recorder);
+        self
     }
 
     /// Returns the configured REST base URL.
@@ -278,6 +289,7 @@ impl QfexHttpClient {
                 Some(Self::rate_limit_keys()),
             )
             .await?;
+        self.record(Method::POST, "/user/leverage", &params, &response);
         // The response body is not used: only the status counts.
         Self::check_status(&response)
     }
@@ -422,6 +434,7 @@ impl QfexHttpClient {
                                 Some(Self::rate_limit_keys()),
                             )
                             .await?;
+                        self.record(Method::GET, endpoint, params, &response);
                         Self::check_status(&response)?;
                         Ok(serde_json::from_slice(&response.body)?)
                     }
@@ -432,6 +445,19 @@ impl QfexHttpClient {
             .retry_delay(&QfexHttpError::retry_after)
             .execute()
             .await
+    }
+
+    fn record(
+        &self,
+        method: Method,
+        endpoint: &str,
+        params: &QueryParams,
+        response: &HttpResponse,
+    ) {
+        if let Some(recorder) = &self.recorder {
+            let status = response.status.as_u16();
+            recorder.rest(method.as_str(), endpoint, params, status, &response.body);
+        }
     }
 
     fn check_status(response: &HttpResponse) -> QfexHttpResult<()> {

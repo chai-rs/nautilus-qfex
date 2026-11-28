@@ -1,6 +1,6 @@
 //! Execution client configuration.
 
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, path::PathBuf};
 
 use nautilus_model::identifiers::{AccountId, InstrumentId};
 use rust_decimal::Decimal;
@@ -34,6 +34,9 @@ pub struct QfexExecClientConfig {
     /// Leverage per instrument, set at connect. A refusal is logged and does not stop the
     /// connect: the venue refuses a change while the symbol has an open order or a position.
     pub leverages: HashMap<InstrumentId, Decimal>,
+    /// Appends every REST answer and trade socket frame to this file, one JSON line each,
+    /// without the key, the secret or any signature.
+    pub record_path: Option<PathBuf>,
 }
 
 impl Default for QfexExecClientConfig {
@@ -50,6 +53,7 @@ impl Default for QfexExecClientConfig {
             api_secret: None,
             cancel_on_disconnect: false,
             leverages: HashMap::new(),
+            record_path: None,
         }
     }
 }
@@ -69,6 +73,7 @@ impl fmt::Debug for QfexExecClientConfig {
             )
             .field("cancel_on_disconnect", &self.cancel_on_disconnect)
             .field("leverages", &self.leverages)
+            .field("record_path", &self.record_path)
             .finish_non_exhaustive()
     }
 }
@@ -86,5 +91,17 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(!debug.contains("not-a-real-secret"));
         assert!(debug.contains("<redacted>"));
+    }
+
+    #[test]
+    fn debug_shows_the_record_path() {
+        let config = QfexExecClientConfig {
+            api_secret: Some("not-a-real-secret".to_string()),
+            record_path: Some(PathBuf::from("recordings/uat-step-3.jsonl")),
+            ..Default::default()
+        };
+        let debug = format!("{config:?}");
+        assert!(debug.contains("recordings/uat-step-3.jsonl"));
+        assert!(!debug.contains("not-a-real-secret"));
     }
 }
