@@ -1,0 +1,81 @@
+STATUS: ROOT-CAUSE
+REPRO: in a throwaway worktree at origin/main (4134e4c), cp .bloop/issues/2026-11-28-trade-orders-before-live-login/repro/src/websocket/client.rs.txt src/websocket/client.rs && cargo test --lib -- trade_order_sent_during trade_late_auth_answer_is_not
+RATE: 20/20 for each of the two tests (loop A unforced: 50/50)
+CHECK: src/websocket/client.rs
+ROUNDS: 1
+ROOT-CAUSE: the trade socket ties nothing to the login of the live connection: `QfexWebSocketClient::send` writes orders with `send_text` as soon as the replacement connection is active, before its `auth`, and `read_loop` forwards an `auth` answer of a replaced connection as `Authenticated`, which `logged_in` takes as the login
+
+## Report
+
+From `issue.md`, which the user asked for in `2026-11-27-trade-late-auth-answer/decision.md` ("## Why escalated", point 3). Two claims, both read from code and not yet run:
+
+1. **Orders can reach the next connection before its `auth`.** `QfexWebSocketClient::send` uses `send_text`, which is not bound to a connection, so an order sent during a reconnect can be written to the replacement connection before that connection's `auth`. Sources: `2026-11-27-trade-late-auth-answer/build.md` ("Notes for reviewers") and `review/round-1/review-security.md` finding 1.
+2. **A stale `Authenticated` counts as a login.** After PR #16, `read_loop` knows an `auth` answer belongs to a connection that is gone and drops its session frames, but still forwards `QfexWsMessage::Authenticated`. `logged_in` in `src/execution/mod.rs` returns `Ok` on it, so the execution client reports a login before the live connection has one.
+
+Reproduced against `origin/main` at `4134e4c`, the merge of PR #16.
+
+## Feedback loop
+
+Two loops, both unit tests in the `tests` module of `src/websocket/client.rs`, against that module's `MockVenue` on `127.0.0.1`. Both added by `evidence/check.patch` (the same change as `repro/src/websocket/client.rs.txt`) and run in a throwaway worktree with its own `CARGO_TARGET_DIR`.
+
+**Loop A, claim 1.** `trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth`. The trade client logs in on socket 1. The test holds the venue's next upgrade (`next_upgrade_gate`) and the subscribe gate's lock (so `read_loop` stops at `RECONNECTED`, in `gate.connection_lost()`), drops socket 1, and calls `client.send(add_order)` while the transport reconnects. It lets the upgrade through, waits 300 ms, then lets the read loop go. It expects socket 2 to receive `[auth, subscribe, add_order]`.
+
+- **20/20 red**, every run the same: socket 2 received `["add_order", "auth", "subscribe"]`
+- Unforced variant (`evidence/loop-a-unforced.patch`): the same test without holding the read loop. **50/50 red**: 46 runs `["add_order", "auth", "subscribe"]`, 4 runs `["auth", "add_order", "subscribe"]` (the order after the `auth` frame but before its answer). The hold only makes the order of the first case certain; the race needs no help
+- Same failure as reported: yes. An `add_order` reaches the next trade socket before that socket's own `auth` has succeeded
+
+**Loop B, claim 2.** `trade_late_auth_answer_is_not_a_login_of_the_next_socket`. The shape of PR #16's `trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth`: the venue holds its answer to the first `auth`, then sends `subscribed` and the `auth` success, and drops socket 1. The test holds the subscribe gate's lock until socket 2 is connected, so `read_loop` handles the `auth` answer after the transport has moved to epoch 1. It collects every message the stream delivers before `Reconnected` and expects no `Authenticated` among them.
+
+- **20/20 red**, every run the same: `the answer of a closed connection reached the stream as a login: [Subscribed, Authenticated]`
+- Same failure as reported: yes. The stale answer reaches the stream as `QfexWsMessage::Authenticated`, the message `logged_in` returns `Ok` on
+
+With both tests added, the rest of the unit suite stays green: 146 passed, 2 failed (the two). Red output of all of it: `repro/red.txt`.
+
+## Hypotheses
+
+Written before any probe ran. One row per hypothesis, in the order they were tested. Every probe is a change in the throwaway worktree, tagged `bloop-debug-2026-11-28-trade-orders-before-live-login`, and saved under `evidence/`.
+
+| # | round | hypothesis | if true, then | probe | result |
+| --- | --- | --- | --- | --- | --- |
+| H1 | 1 | Loop A: `QfexWebSocketClient::send` (`src/websocket/client.rs:573-579`, the `send_text` call at `:578`) sends with `send_text`, which is bound to no connection and no login. It waits in `wait_for_active` and enqueues the order as soon as the replacement is active, before `read_loop` handles `RECONNECTED` and `start_session` sends that connection's `auth` | making `send` wait until `read_loop` has seen a success `auth` answer on the live epoch, then send with `send_text_on_connection` on that epoch, turns loop A and its unforced variant green; taking it out turns both red | a login epoch the read loop publishes on a live `Authenticated`, which `send` waits for (`evidence/probe-h1.patch`) | **confirmed**. With the probe: loop A 0/20, unforced 0/50, the rest of the unit suite green (147 passed, only loop B red). Probe taken out: loop A 20/20 red, unforced 50/50 red |
+| H2 | 1 | Loop A takes nautilus-network's replay buffer: the writer takes the order in reconnect mode, buffers it, and drains it to socket 2 before `RECONNECTED` | nautilus-network logs `Buffering message for replay` and `buffered messages after reconnection` in the red runs | a test logger that prints nautilus-network's log lines during loop A (`evidence/probe-h2.patch`, one run's log in `evidence/probe-h2-loop-a.log`) | falsified. 40 red runs (20 loop A, 20 unforced), none logged the replay buffer. Every run logged `Waiting for client to become ACTIVE before sending...`, then `Reconnected successfully`, then the order as an ordinary `Sending text frame (167 bytes)` ahead of socket 2's `auth` (`Sending text frame once: epoch=1 (210 bytes)`). The order waited in `wait_for_active`; it was not replayed |
+| H3 | 1 | Loop A is a stand-in artefact: the order went out on socket 1 before its drop, and `MockVenue` counts it under connection 2 | socket 1's recorded frames hold the `add_order` | print `venue.requests(1)` and `venue.requests(2)` before the assertion (`evidence/probe-h3.patch`, output `evidence/probe-h3.txt`) | falsified. In 40 runs socket 1 recorded `["auth", "subscribe"]` only; the `add_order` was always on socket 2 |
+| H4 | 1 | Loop B: the `Authenticated` arm of `read_loop` (`src/websocket/client.rs:690`) checks the epoch only inside `send_session_frames` (`:641-646`) and forwards the message whatever the epoch | not forwarding an `Authenticated` whose epoch is not `client.connection_epoch()` turns loop B green; taking it out turns it red | `continue` before the forward for an `Authenticated` whose epoch is not `client.connection_epoch()` (`evidence/probe-h4.patch`) | **confirmed**. With the probe: loop B 0/20, PR #16's `trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth` still green, the rest of the unit suite green (147 passed, only loop A red). Probe taken out: loop B 20/20 red |
+| H5 | 1 | Loop B: the `Authenticated` before `Reconnected` is socket 2's answer, delivered ahead of `RECONNECTED`, not the stale one | a log line at the forward shows epoch 1 for the `Authenticated` delivered before `Reconnected` | log the epoch and `connection_epoch()` at each forwarded `Authenticated` and `Reconnected` (`evidence/probe-h5.patch`, output `evidence/probe-h5.txt`) | falsified. In 20 of 20 runs the `Authenticated` before `Reconnected` was forwarded with epoch 0 while the live epoch was 1 |
+| H6 | 1 | Claim 2's consequence: `logged_in` (`src/execution/mod.rs:399-414`) returns `Ok` on the stale answer, before socket 2 has sent or had answered its own `auth` | `logged_in` on loop B's stream returns `Ok` and the next message is `Reconnected` | make `logged_in` `pub(crate)` and call it on loop B's stream (`evidence/probe-h6.patch`, output `evidence/probe-h6.txt`) | **confirmed**, as a consequence of H4. 20 of 20 runs: `logged_in` returned `Ok`, the live epoch was 1, socket 2 had received no frame at all, and the next message was `Reconnected`. With `probe-h4.patch` added: `logged_in` returned `Ok` only once socket 2 had its `auth` and session `subscribe`, 20 of 20 |
+
+There are two claims in this issue, so there are two loops and one confirmed hypothesis for each: H1 for loop A and H4 for loop B (H6 is the execution-level consequence of H4). No round was needed beyond the first. Every patch a result relies on is under `evidence/` and applies to the check with `patch -p1` (H2 and H3 on top of `loop-a-unforced.patch` too).
+
+## Root cause
+
+Both claims are true, and both come from one gap: on the trade socket nothing ties a request, or the login the execution client waits for, to the login of the connection that is live now. PR #16 bound `auth` and the session frames to their connection epoch; orders and the login signal were left out.
+
+**Claim 1, orders (H1).** `QfexWebSocketClient::send` (`src/websocket/client.rs:573-579`) writes every request with `client.send_text` (`:578`). In nautilus-network 0.67.0 that call waits in `wait_for_active` while the transport reconnects (`websocket/client.rs:3515`, `:3389`) and enqueues the frame the moment the replacement is active (`state_notify.notify_waiters()`, `:3867`), at the same moment `RECONNECTED` is handed to the read loop (`:3878`). `start_session` (`src/websocket/client.rs:675`) only then signs and sends that connection's `auth`, so the order is ahead of it. H2 shows the order is not replayed from the buffer the issue points at; it simply waited out the reconnect. Unforced, the order beat the `auth` frame in 46 of 50 runs and beat its answer in 50 of 50. The H1 probe, `send` waiting for a login on the live epoch and sending on that epoch, made the loop green, and taking it out made it red. That probe is evidence only.
+
+**Claim 2, the stale login (H4, H6).** In `read_loop` the `Authenticated` arm (`src/websocket/client.rs:690`) calls `send_session_frames`, which sees that the answer's epoch is not the live one and drops the frames (`:641-646`), and then the loop forwards the message anyway (`:695`). `QfexWsMessage::Authenticated` carries no epoch, so `logged_in` (`src/execution/mod.rs:399-414`) returns `Ok` on the first one (`:403`) while socket 2 has not even sent its `auth`. `connect` (`src/execution/mod.rs:758`) then goes on to `set_leverage` (`:776`), which sends through the same `send`, and reports the client connected. Skipping a stale `Authenticated` in the read loop made the loop green and `logged_in` wait for socket 2's own answer; taking it out made it red. Evidence only; the fix belongs to box 3 Planning.
+
+## Where the check goes
+
+The check is saved at `repro/src/websocket/client.rs.txt`, a whole copy of `src/websocket/client.rs` at `4134e4c` that differs only inside `mod tests`: the helper `add_order()` and the two tests `trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth` (loop A) and `trade_late_auth_answer_is_not_a_login_of_the_next_socket` (loop B). It needs no change to `MockVenue`. `evidence/check.patch` is the same change as a diff. The `.txt` suffix keeps test runners from picking it up. Run against unfixed code without any probe it failed 20 of 20 times per test, and the rest of the unit suite stayed green (146 passed, 2 failed); that output is in `repro/red.txt`. It is formatted with `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` passes with it.
+
+Why this seam: both tests drive `QfexWebSocketClient` through `new_trade`, `connect`, `send` and its stream, against the stand-in the neighbouring trade tests use, and assert what the issue asks for: an order reaches a connection only after that connection's own `auth`, and the stream reports a login only for the live connection.
+
+Two findings for box 3 Planning:
+
+- **The seam still needs the internal lock.** Like PR #16's check, both tests hold `client.session.gate.state` to stop `read_loop` at a known frame (`RECONNECTED` in loop A, the `subscribed` frame in loop B). If the fix changes how `read_loop` awaits that lock, the tests stop holding anything. Loop A does not depend on it to go red (the unforced variant fails 50/50), but the exact frame order it asserts does. Loop B depends on it entirely. PR #16's debug already asked box 3 for a read-loop seam a test can drive one frame at a time; this issue is a second user of it
+- **The login has no seam at the execution level.** `logged_in` is private, and `tests/exec_client.rs` cannot make the read loop handle an `auth` answer after the transport has moved, so the consequence (H6) was shown only by making `logged_in` `pub(crate)` in the throwaway worktree. A check for "the execution client reports a login only for the live connection" at the `ExecutionClient::connect` seam needs a way to delay the read loop, or a login signal that carries the epoch, which is one of the two fix shapes the issue lists
+
+## Why the gate missed this
+
+Fix the architecture. PR #16 bound the frames the read loop sends to their connection, but the two things that depend on a login, outgoing requests and the login signal itself, still carry no connection: `send` uses the one call that crosses connections, and `QfexWsMessage::Authenticated` has no epoch for `logged_in` or `consume` to compare. A test would catch these two cases, as the check does, but not the next request or signal added without an epoch. A login state owned by the WebSocket client (which epoch, if any, is logged in) that both `send` and the execution client read would make the wrong use hard to write. nautilus-network 0.67.0 has `AuthTracker` and `reconnect_buffer_waits_for_auth` for the replay buffer; H2 shows this path does not go through that buffer, so that gate alone would not cover it.
+
+## Not covered
+
+- **The replay-buffer path.** An order the writer takes while the dying connection still looks active, or fails to write, goes into nautilus-network's replay buffer and is written to the replacement before `RECONNECTED` (`docs/external/nautilustrader/README.md`). This run never hit that path (H2: 0 of 40 runs); it cannot be forced from a test. It ends in the same place, an order before `auth`, and a fix that sends only on a logged-in epoch with `send_text_on_connection` covers it as the H1 probe did
+- **Duplicate orders.** The issue's constraint: a fix that gates or drops requests must never send an order twice or drop one silently. With the H1 probe a request on a replaced epoch fails with `ConnectionChanged`; what the execution client does with that error (today `submit` only logs it, `src/execution/mod.rs:577-581`) was not probed. Box 3 Planning has to decide it
+- **An answer handled before the transport notices the drop.** If `read_loop` handles socket 1's `auth` answer while `connection_epoch()` is still 0 and socket 1 is already gone, the answer looks live to any epoch check, and `logged_in` returns `Ok` for a dead connection. That window is inherent; `consume` handles the `Reconnected` that follows. Not probed
+- **`consume` after a reconnect.** `consume` (`src/execution/mod.rs:445-458`) sets `authenticated` on the first `Authenticated` after `Reconnected`. A stale answer arriving after a second `RECONNECTED` would be taken the same way. Same cause as H4, not probed separately
+- **Market data socket.** Not touched: it has no login
+- **The real venue.** What QFEX answers to an `add_order` before `auth` is unknown (`docs/STATUS.md` marks the trade client UNVERIFIED). Nothing here contacted QFEX; every run was against `MockVenue` on `127.0.0.1`
+- **`nautilus-risex` and `nautilus-lighter` 0.67.0.** Not on this machine, so not read
+- **Grep for the probe tag.** `git grep --untracked -n "bloop-debug-2026-11-28-trade-orders-before-live-login"` in the main checkout finds the tag only in this issue's `evidence/probe-*.patch` files and `loop-a-unforced.patch`, which keep the probes as files on purpose, and in this file. No file the repo uses has it

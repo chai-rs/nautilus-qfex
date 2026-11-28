@@ -1,4 +1,4 @@
-DECISION: NEEDS-INFO
+DECISION: ACCEPT
 TYPE: chore
 FR: none
 RISK: medium
@@ -7,18 +7,12 @@ RESCOPED: no
 
 ## Summary
 
-- The work fits the project and is one pull request: a rule in `AGENTS.md`, a matching `.bloop/issues/README.md`, and one check. No adapter code or test changes
-- `issue.md` reserves two choices for a person: the route records take to `main`, and the signal that catches stranded records. The code cannot make either choice, so the work waits on answers
-- Post-merge records already have a route in `AGENTS.md` line 21 (`chore/<id>-records`, archive pushed as `main:chore/<id>-archive`). The open part is the records written before the merge: `AGENTS.md` line 20 still sends them to the issue branch, but they are written in the main checkout
-- `.bloop/issues/README.md` is byte-identical to the plugin's `templates/issues-README.md`, so editing it here makes it different from the plugin copy. Whether that is allowed is also a person's call
-- Risk is medium: the change affects how every later issue's records reach `main`, and the check has to see remote branches and pull requests, which `checks.sh` cannot do offline
+- The person answered the three questions of the first run in session: records written before the merge (b) are copied into the issue's worktree and ride in the code's pull request · the signal (a) is a CI job on pull requests · `.bloop/issues/README.md` may be edited in this repo
+- That settles the contradiction between `AGENTS.md:20` (records go on the `bin/work` branch) and the README's "Where issue files live" (every issue file is written in the main checkout): both stay true, the main checkout holds the live copy and the worktree carries a copy into the pull request
+- The route also covers project files a skill writes in the main checkout that the code's acceptance criteria depend on, such as `docs/external/` (the `2026-11-27-trade-late-auth-answer` case), not only `.bloop/issues/`
+- Post-merge records keep the route `AGENTS.md:21` already gives them (`chore/<id>-records`, archive pushed as `main:chore/<id>-archive`), which worked for `2026-11-27-trade-socket-state` (PR #10)
+- One pull request: `AGENTS.md`, `.bloop/issues/README.md` and a job in `.github/workflows/`. No adapter code or tests. Risk stays medium because every later issue's records follow the new route
 
 ## Why
 
-`AGENTS.md:20` says records go on the `bin/work` branch, and `.bloop/issues/README.md` ("Where issue files live") says every issue file is written in the main checkout, where `bin/job` reads it. Both cannot hold together. `issue.md` lists three routes and says "A person decides the route". Its check line ends "or another signal the person prefers". `checks.sh` must run offline (its header says so), so a check on branch age against pull request state means a CI or scheduled workflow under `.github/workflows/`, a different kind of guardrail. Choosing for the person here would bypass the decision `issue.md` reserves.
-
-## Questions
-
-1. Which route do records written before the merge (`intake.md` to `decision.md`) take to `main`? (a) Committed in the main checkout and published through a short `chore/<id>-records` pull request, as post-merge records already are. (b) Copied into the issue's worktree so they ride in the code's pull request. (c) Left for a bloop plugin change outside this repo, with only the contradiction documented here
-2. Which signal catches records stranded off `main`? (a) A CI job on pull requests to `main`. (b) A scheduled workflow that lists remote branches holding `.bloop/issues/` commits that are not on `origin/main`. (c) A step `/bloop:retro` or `/bloop:deliver` runs by hand, with no automated check
-3. May this repo edit `.bloop/issues/README.md`, which is a verbatim copy of the plugin's `templates/issues-README.md`? If not, `AGENTS.md` alone states the route and the README is left as the plugin ships it
+`issue.md` reserved the route and the signal for a person, and the person has now chosen among the options it listed, so nothing is left for the requester and the work fits one pull request. The job belongs in CI, not `checks.sh`, because `checks.sh` must run offline (its header says so) and only a `pull_request` run in `.github/workflows/ci.yml` knows the head branch and what the pull request carries. One thing for box 3 Planning to settle: after the code merges, the main checkout still holds untracked copies of the same record files, which can block `git pull` on `main`, so the route has to say how those copies are dropped or committed.

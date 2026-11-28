@@ -1,0 +1,42 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -1295,6 +1295,23 @@
+         client.disconnect().await;
+     }
+ 
++    // bloop-debug-2026-11-28-trade-orders-before-live-login
++    struct ProbeLogger;
++    impl log::Log for ProbeLogger {
++        fn enabled(&self, _: &log::Metadata) -> bool { true }
++        fn log(&self, record: &log::Record) {
++            if record.target().starts_with("nautilus_network") || record.target().starts_with("nautilus_qfex") {
++                eprintln!("PROBE {} {}: {}", record.level(), record.target(), record.args());
++            }
++        }
++        fn flush(&self) {}
++    }
++    fn probe_logger() {
++        if log::set_logger(&ProbeLogger).is_ok() {
++            log::set_max_level(log::LevelFilter::Trace);
++        }
++    }
++
+     fn add_order() -> QfexTradeRequest {
+         QfexTradeRequest::AddOrder(crate::websocket::messages::QfexAddOrder {
+             symbol: aapl(),
+@@ -1310,6 +1327,7 @@
+ 
+     #[tokio::test]
+     async fn trade_order_sent_during_a_reconnect_reaches_the_next_socket_only_after_its_auth() {
++        probe_logger(); // bloop-debug-2026-11-28-trade-orders-before-live-login
+         let (venue, url) = MockVenue::start().await;
+         let mut client = QfexWebSocketClient::new_trade(&url, fixed_signer(), false).unwrap();
+         let mut rx = client.connect().await.unwrap();
+@@ -1352,6 +1370,7 @@
+ 
+     #[tokio::test]
+     async fn trade_order_unforced_bloop_debug_2026_11_28_trade_orders_before_live_login() {
++        probe_logger(); // bloop-debug-2026-11-28-trade-orders-before-live-login
+         let (venue, url) = MockVenue::start().await;
+         let mut client = QfexWebSocketClient::new_trade(&url, fixed_signer(), false).unwrap();
+         let mut rx = client.connect().await.unwrap();

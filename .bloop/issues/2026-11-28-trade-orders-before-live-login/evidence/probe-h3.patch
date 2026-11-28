@@ -1,0 +1,20 @@
+--- a/src/websocket/client.rs
++++ b/src/websocket/client.rs
+@@ -1341,6 +1341,8 @@
+             .iter()
+             .map(|frame| frame["type"].clone())
+             .collect();
++        eprintln!("PROBE socket 1: {:?}", venue.requests(1).iter().map(|f| f["type"].clone()).collect::<Vec<_>>()); // bloop-debug-2026-11-28-trade-orders-before-live-login
++        eprintln!("PROBE socket 2: {:?}", venue.requests(2).iter().map(|f| f["type"].clone()).collect::<Vec<_>>()); // bloop-debug-2026-11-28-trade-orders-before-live-login
+         assert_eq!(
+             kinds,
+             [json!("auth"), json!("subscribe"), json!("add_order")],
+@@ -1381,6 +1383,8 @@
+             .iter()
+             .map(|frame| frame["type"].clone())
+             .collect();
++        eprintln!("PROBE socket 1: {:?}", venue.requests(1).iter().map(|f| f["type"].clone()).collect::<Vec<_>>()); // bloop-debug-2026-11-28-trade-orders-before-live-login
++        eprintln!("PROBE socket 2: {:?}", venue.requests(2).iter().map(|f| f["type"].clone()).collect::<Vec<_>>()); // bloop-debug-2026-11-28-trade-orders-before-live-login
+         assert_eq!(
+             kinds,
+             [json!("auth"), json!("subscribe"), json!("add_order")],

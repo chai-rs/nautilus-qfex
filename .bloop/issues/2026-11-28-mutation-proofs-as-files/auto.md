@@ -1,4 +1,4 @@
-WAITING: Is this restate right? (ACCEPT, TYPE test, risk medium, surfaces none; restate.md says CONFIRMED: no). Not answered by trust level: the session's permission check blocked writing CONFIRMED-BY trustLevel autonomous on the previous issue, so a person confirms
+WAITING: restate confirmed by the user in the session ("yes ทั้งสอง", 2026-11-28); the signature could not be written by an agent (permission check). A person sets line 1 of restate.md to CONFIRMED: yes with CONFIRMED-BY under it
 STOPPED: waiting
 
 ## Runs

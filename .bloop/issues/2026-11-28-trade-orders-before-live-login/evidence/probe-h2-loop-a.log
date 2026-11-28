@@ -1,0 +1,25 @@
+PROBE DEBUG nautilus_network::websocket::client: Connecting
+PROBE DEBUG nautilus_network::websocket::client: Started message handler task 'read'
+PROBE DEBUG nautilus_network::logging: Started task 'write'
+PROBE DEBUG nautilus_network::logging: Started task 'heartbeat'
+PROBE TRACE nautilus_network::websocket::client: Sending text frame once: epoch=0 (210 bytes)
+PROBE DEBUG nautilus_network::logging: Started task 'controller'
+PROBE TRACE nautilus_network::websocket::client: Received text frame (34 bytes)
+PROBE TRACE nautilus_network::websocket::client: Sending text frame once: epoch=0 (93 bytes)
+PROBE WARN nautilus_network::websocket::client: Connection closed by peer (no close frame), terminating
+PROBE INFO nautilus_network::websocket::client: Detected dead connection, transitioning to Reconnect
+PROBE DEBUG nautilus_network::websocket::client: Reconnection attempt 1 of unlimited
+PROBE INFO nautilus_network::websocket::client: Reconnecting
+PROBE DEBUG nautilus_network::websocket::client: Waiting for client to become ACTIVE before sending...
+PROBE DEBUG nautilus_network::websocket::client: Received new writer
+PROBE DEBUG nautilus_network::websocket::client: Updated writer: epoch=1
+PROBE DEBUG nautilus_network::websocket::client: Writer confirmed socket update: epoch=1
+PROBE DEBUG nautilus_network::websocket::client: Started message handler task 'read'
+PROBE INFO nautilus_network::websocket::client: Reconnect succeeded
+PROBE DEBUG nautilus_network::websocket::client: Sent reconnected message to epoch handler: epoch=1
+PROBE DEBUG nautilus_network::websocket::client: Reconnected successfully
+PROBE TRACE nautilus_network::websocket::client: Sending text frame (167 bytes)
+PROBE TRACE nautilus_network::websocket::client: Sending text frame once: epoch=1 (210 bytes)
+PROBE TRACE nautilus_network::websocket::client: Received text frame (34 bytes)
+PROBE TRACE nautilus_network::websocket::client: Sending text frame once: epoch=1 (93 bytes)
+PROBE DEBUG nautilus_network::logging: Aborted task 'read'
