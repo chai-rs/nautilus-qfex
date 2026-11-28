@@ -1,4 +1,5 @@
-CONFIRMED: no
+CONFIRMED: yes
+CONFIRMED-BY: user, in the session ("yes ทั้งสอง", 2026-11-28)
 
 # The gate tests its own tree and says which tree that was
 
