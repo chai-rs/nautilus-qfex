@@ -46,7 +46,7 @@ Depends on one outside system: NautilusTrader 0.67.0, recorded in `docs/external
 
 | # | slice | check that proves it | status |
 | --- | --- | --- | --- |
-| 1 | Add the private module `trade_socket` of `execution` with `StateOnlyTradeSocketControl` (`built_on_first_connect()`, `sink(client_id)`, private `control: Option<SocketControl>`, `TRADE_ENDPOINT`); `QfexExecutionClient` replaces `socket: Option<SocketControl>` with `trade_socket_control: StateOnlyTradeSocketControl` and takes its sink in `connect()`. No comment, no test, no doc change | `cargo test --test exec_client socket_state_follows_the_trade_socket` passes; `grep -nw -e SocketControl -e SocketControlFactory -e register src/execution/mod.rs` prints nothing; `git diff origin/main -- tests docs README.md ARCHITECTURE.md` is empty; `cargo test` reports the count `docs/STATUS.md` states (171 at `92dca56`), 0 failed | todo |
+| 1 | Add the private module `trade_socket` of `execution` with `StateOnlyTradeSocketControl` (`built_on_first_connect()`, `sink(client_id)`, private `control: Option<SocketControl>`, `TRADE_ENDPOINT`); `QfexExecutionClient` replaces `socket: Option<SocketControl>` with `trade_socket_control: StateOnlyTradeSocketControl` and takes its sink in `connect()`. No comment, no test, no doc change | `cargo test --test exec_client socket_state_follows_the_trade_socket` passes; `grep -nw -e SocketControl -e SocketControlFactory -e register src/execution/mod.rs` prints nothing; `git diff origin/main -- tests docs README.md ARCHITECTURE.md` is empty; `cargo test` reports the count `docs/STATUS.md` states (171 at `92dca56`), 0 failed | done |
 
 ## Acceptance criteria
 
