@@ -1,6 +1,7 @@
 REVIEWER: security, code
 MODEL: opus
-APPROVED: no
+APPROVED: yes
+APPROVED-BY: trustLevel autonomous
 
 # Trade socket session frames stay on the connection that logged in
 
