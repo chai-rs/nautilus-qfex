@@ -283,6 +283,11 @@ Results so far (28 Nov 2026, UAT, `exec_tester` from branch `test/2026-11-27-uat
   the fix: login, the four private subscriptions, `get_user_orders`, and reconciliation of
   `/user/positions`, `/user/trade` and `/user/historic-orders` all answered.
 - The UAT market data host `wss://mds.qfex.io` works: the data client loaded 53 instruments.
+- Step 3 not done: run on Saturday 28 Nov 2026, 12:29 UTC, in the `weekend` session of
+  `AAPL-USD`. In 67 s no quote came; the UAT book had one bid (50, size 1) and no ask, and the
+  books of `CL-USD`, `GOLD-USD`, `EUR-USD` and `US100-USD` were empty. The tester sent no
+  order. Steps 3 to 7 wait for a session with a two-sided book (`AAPL-USD` pre-market opens
+  Monday 04:00, venue time).
 
 1. `GET /user/positions`: proves the HMAC headers. A 401 here means the signature is wrong.
 2. Connect the trade socket: proves the auth message and shows the real login answer.
