@@ -1,5 +1,5 @@
-WAITING: Is this restate right? (ACCEPT, TYPE ci, risk medium, surfaces none; restate.md says CONFIRMED: no). The trust level answer could not be written: the session's permission check blocked writing CONFIRMED-BY trustLevel autonomous, so a person has to confirm
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -8,6 +8,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | # | when | box | skill | before | after | result |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 2026-11-28T10:45Z | 2 | restate | no-intake | restated | ACCEPT, ci, risk medium; confirmation blocked by the permission check, waits on a person |
+| 2 | 2026-11-28T11:15Z | 2 | restate | awaiting-human | awaiting-plan | the user confirmed ("yes ทั้งสอง"); CONFIRMED-BY the user |
 
 ## Answered by trust level
 
