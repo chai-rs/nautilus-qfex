@@ -10,6 +10,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | 1 | 2026-11-28T06:16Z | 4 | build | planned | built | 3 slices green, 173 tests, loop-a 0/90 (10/90 on main); draft PR #16 |
 | 2 | 2026-11-28T06:21Z | 5 | review | built | escalated | code PASS (0/0), security PASS (0 must, 1 should); approver ESCALATE |
 | 3 | 2026-11-28T07:55Z | 5 | (person) | escalated | reviewing | the user decided the 3 escalation points; `decision.md` moved to `review/round-1/decision.md`; back to build round 2 |
+| 4 | 2026-11-28T08:30Z | 4 | build | reviewing | reviewing | round 2: 1 check for the `ConnectionChanged` branch, red under 2 mutations; gate 174 passed; pushed to PR #16 |
 
 ## Answered by trust level
 
