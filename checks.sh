@@ -52,7 +52,7 @@ compare() {
 compare '`cargo test --features examples`' \
   "$(sed -nE 's/^\| `cargo test --features examples` \| ([0-9]+) passed.*/\1/p' docs/STATUS.md)" "$EXAMPLES_TEST_LOG"
 compare '`cargo test`' \
-  "$(sed -nE 's/^\| `cargo test` \(no feature.*\| The same ([0-9]+) \|.*/\1/p' docs/STATUS.md)" "$PLAIN_TEST_LOG"
+  "$(sed -nE 's/^\| `cargo test` \(no feature[^|]*\| ([0-9]+) passed.*/\1/p' docs/STATUS.md)" "$PLAIN_TEST_LOG"
 
 # A shortcut marker has to be complete: a ceiling and a trigger to revisit, comma separated.
 # The marker may wrap: the comment lines that follow it are read as part of it.

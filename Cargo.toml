@@ -85,6 +85,7 @@ required-features = ["examples"]
 name = "exec_tester"
 path = "examples/exec_tester.rs"
 doc = false
+test = true
 required-features = ["examples"]
 
 # The binaries need no feature, as in nautilus-risex. Unlike there, `test` stays on: each file

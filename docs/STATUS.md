@@ -29,8 +29,8 @@ again.
 |---|---|
 | `cargo fmt --check` | Clean |
 | `cargo build --bins --examples --features examples` | Passes: `qfex-flatten`, `qfex-trades-probe`, `data_tester`, `exec_tester` |
-| `cargo test --features examples` | 180 passed, 0 failed: 151 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 5 data client, 14 execution client (28 Nov 2026, Linux, with the recording; 174 before it; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
-| `cargo test` (no feature, as in CI) | The same 180 |
+| `cargo test --features examples` | 193 passed, 0 failed: 151 unit, 8 `qfex-flatten`, 2 `qfex-trades-probe`, 13 `exec_tester`, 5 data client, 14 execution client (28 Nov 2026, Linux, with the UAT steps of `exec_tester`; 180 with the recording only; 174 before it; 171 at `d779309` and `92dca56`, 170 at `4b46b86`, 168 at `362bcb0`, 166 at `4f4ed16`, 162 before `0e8ed08`, 152 before 13 Nov, 145 before 12 Nov) |
+| `cargo test` (no feature, as in CI) | 180 passed: the same less the 13 `exec_tester` tests, which need the `examples` feature |
 | `cargo clippy --all-targets --features examples -- -D warnings` | Clean |
 | `cargo clippy --all-targets -- -D warnings` (no feature, as in CI) | Clean |
 | `cargo bench --no-run` | Builds the four benches |
@@ -86,7 +86,7 @@ server only.
 | Reconciliation (reports, paging, catch-up after reconnect) | UNVERIFIED on the venue. Mock |
 | `config`, `factories` | Unit tests; the data factory runs in `data_tester` |
 | `examples/data_tester.rs` | Run twice, keyless (11 and 13 Nov) |
-| `examples/exec_tester.rs` | Compiles only; never run against the venue |
+| `examples/exec_tester.rs` | Never run against the venue. Unit tests of the step mapping: UAT for every step, one recording file a step, no step or an unknown step refused |
 | `bin/trades_probe.rs` (`qfex-trades-probe`) | 2 unit tests; run once, keyless, against the mainnet market data socket |
 | `bin/flatten.rs` (`qfex-flatten`) | UNVERIFIED on the venue: compiles; never run against the venue. 8 unit tests of its plan and of how it reads the answers |
 | Benches | Build; one run (see "Benches") |
@@ -285,6 +285,27 @@ Do these on UAT (`qfex.io`) with a UAT key, in this order, before any mainnet or
 8. Replace the hand-made fixtures with the recorded frames.
 9. `qfex-flatten uat` with one resting order, one stop order and one small position. Check
    that the plan lists all three, and that the account is flat after Enter.
+
+### Commands
+
+Each command reads `QFEX_UAT_API_KEY` and `QFEX_UAT_API_SECRET` from the environment; set
+them in your shell, never in a file of the repository. `exec_tester` runs on UAT only and
+writes `recordings/uat-step-<step>.jsonl`, which git ignores. Stop it with Ctrl-C. The tester
+trades `AAPL-USD-PERP.QFEX`, which trades in its market hours only.
+
+| Step | Command | What it does |
+|---|---|---|
+| 1 and 2 | `cargo run --example exec_tester --features examples -- 2` | Connects: `GET /user/positions`, then the trade socket login. Dry run: no order |
+| 3 | `cargo run --example exec_tester --features examples -- 3` | One post-only limit buy 100 ticks under the best bid, cancelled on Ctrl-C |
+| 4 | `cargo run --example exec_tester --features examples -- 4` | As 3, then one modify of the resting order once it is accepted |
+| 5 | `cargo run --example exec_tester --features examples -- 5` | One market buy of 0.010 on the first quote, closed on Ctrl-C |
+| 6 | `cargo run --example exec_tester --features examples -- 6` | One stop-market buy 100 ticks over the market, cancelled on Ctrl-C |
+| 7 | `cargo run --example exec_tester --features examples -- 7` | One resting post-only limit buy with cancel on disconnect. Drop the network by hand for longer than 20 s (the heartbeat), then bring it back |
+| 8 | none | The agent cuts fixtures from the files of `recordings/` |
+| 9 | `cargo run --bin qfex-flatten uat` | Prints its plan, waits for Enter. Records nothing |
+
+The UAT market data host `wss://mds.qfex.io` is assumed (see below). If the tester gets no
+quote, steps 3 to 7 place no order; the recording of steps 1 and 2 still holds.
 
 ## Not verified against the venue
 
