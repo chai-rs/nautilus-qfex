@@ -9,6 +9,7 @@ BLOCKED-ON: UAT steps 3 to 7 need a session with a two-sided book. Steps 1 and 2
 | 2 | `45a1d1c` | `./checks.sh` (holds `cargo test --features examples --example exec_tester`) | PASS, exit 0, 21 s: 193 passed with the feature (13 `exec_tester`), 180 without, both count rows as written. Red first: `cannot find type UatStep`. Also ran: step `9` prints the usage, exit 2, no `recordings/` created | `evidence/slice-2.md` |
 | UAT fix | `26750aa` | `./checks.sh` (holds `cargo test --lib login_answer`) | PASS, exit 0: 197 with the feature, 184 without. Red first: 4 failed. Found by UAT step 2: the login answer is `{"authenticated":true}` | `evidence/uat-login-fix.md`, `evidence/uat-run-1.md` |
 | UAT step 3 record | `c4c0eb9` | `./checks.sh` | PASS, exit 0 (docs only: the step 3 outcome in `docs/STATUS.md`) | `evidence/uat-step-3-no-quote.md` |
+| instrument argument | `b0ecb25` | `./checks.sh` (holds `cargo test --features examples --example exec_tester`) | PASS, exit 0: 204 with the feature (20 `exec_tester`), 184 without. Red first: `cannot find type UatRun`. Also ran on UAT: `-- 2 GOLD-USD 0.001` logged in, reconciled, subscribed `GOLD-USD` quotes; no order | `evidence/exec-tester-instrument.md` |
 
 ## Acceptance criteria
 
@@ -35,4 +36,5 @@ Copied from `spec.md`. Ticked only where evidence backs it.
 - Slice 2 comment pass: 6 module and function comments deleted; the step descriptions moved into `UatStep::what_it_does`, printed in the usage and at start
 - Not done: `data_tester` still reads mainnet public data only; the plan does not ask for a UAT mode there
 - UAT run 1 (28 Nov 2026) was run by the agent at the person's request in this session, with the key the person put in `.env`. The plan had the person run it. Steps 1 and 2 passed; the login fix `26750aa` is work the plan puts in slice 3, done early because steps 3 to 7 cannot run without it
+- The person asked to check other symbols: UAT lists no crypto (54 symbols: equity, commodity, index, FX), and mainnet's public `/refdata` lists none either. `exec_tester` took `SYMBOL QTY` arguments so the run can use a symbol whose session is open
 - `MUST KILL` flags left unresolved: none

@@ -1,4 +1,4 @@
-WAITING: UAT steps 3 to 7 wait for a two-sided book (AAPL-USD pre-market opens Monday 04:00 venue time); run them again then? Push the branch and open a draft PR first?
+WAITING: UAT steps 3 to 7 wait for a two-sided book; scheduled tasks run them on 2026-11-29T22:15Z (GOLD-USD, Sunday open) and 2026-11-30T14:45Z (AAPL-USD regular session). Step 7 needs the person to drop the network
 STOPPED: waiting
 
 ## Runs
@@ -31,3 +31,5 @@ One line each time a run ended, newest last. The reason is one of `done` `waitin
 - 2026-11-28T12:25Z · waiting · build blocked on the person's UAT run; push and draft PR wait on a yes
 - 2026-11-28T12:22Z · user · person asked the agent to run UAT with the key in .env ("run uat ให้หน่อยเพราะให้ apikey ไปแล้ว")
 - 2026-11-28T12:35Z · waiting · steps 3 to 7 need a two-sided UAT book; the weekend session has none
+- 2026-11-28T12:36Z · user · person said ok to push and a draft PR (#21 opened) and asked for a scheduled run of steps 3 to 7
+- 2026-11-28T12:55Z · user · person asked to check BTC, then chose both runs ("ทั้ง 2"): Sunday GOLD-USD and Monday AAPL-USD
