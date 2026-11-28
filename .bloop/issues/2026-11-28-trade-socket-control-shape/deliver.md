@@ -22,6 +22,7 @@ One row per step, in order. A step that was skipped says why, because a blank ro
 | deploy | none | `deliver.deployCommand` is null and CI does not deploy: `ci.yml` runs `./checks.sh` and the fuzz build only. CI run on the merge commit: https://github.com/chai-rs/nautilus-qfex/actions/runs/46118159407 (in progress when recorded). Nothing ships from this repo, so `STATUS` stays `MERGED` |
 | fuzz | not run | `/bloop:auto` drives this run and checks `bin/fuzz-due` itself |
 | docs | `bin/docs` | exit 1, `docs/product` does not exist yet; nothing to refresh |
+| cleanup | `git worktree remove .worktrees/2026-11-28-trade-socket-control-shape` | removed after the user said yes ("ลบได้"); it held no uncommitted files |
 
 ## Watch after deploy
 
