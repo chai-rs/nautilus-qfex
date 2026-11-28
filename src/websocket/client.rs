@@ -837,10 +837,10 @@ mod tests {
                             && self.defer_first_auth_then_drop.load(Ordering::SeqCst)
                         {
                             deferred.push(json!({"subscribed": "fills"}).to_string());
-                            deferred.push(json!({"type": "auth", "result": "success"}).to_string());
+                            deferred.push(json!({"authenticated": true}).to_string());
                             vec![]
                         } else if frame["type"] == "auth" {
-                            vec![json!({"type": "auth", "result": "success"}).to_string()]
+                            vec![json!({"authenticated": true}).to_string()]
                         } else if frame["type"] == "subscribe" && frame["params"].is_null() {
                             if self.refuse_now(&frame) {
                                 vec![

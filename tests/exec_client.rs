@@ -205,7 +205,8 @@ impl Venue {
                 ];
             }
             *authenticated = true;
-            return vec![json!({"type": "auth", "result": "success"})];
+            // Recorded on UAT, 28 Nov 2026.
+            return vec![json!({"authenticated": true})];
         }
 
         let mut state = self.state.lock();
@@ -1079,7 +1080,7 @@ async fn recording_holds_the_frames_and_no_key() {
     assert_eq!(body, fixture("user_positions"));
 
     assert_eq!(sent[0], json!({"type": "auth"}));
-    assert!(received.contains(&json!({"type": "auth", "result": "success"})));
+    assert!(received.contains(&json!({"authenticated": true})));
     assert!(sent.iter().any(|frame| frame["type"] == "subscribe"));
     let add = sent.iter().find(|frame| frame["type"] == "add_order");
     assert_eq!(add.unwrap()["params"]["client_order_id"], "O-1");
