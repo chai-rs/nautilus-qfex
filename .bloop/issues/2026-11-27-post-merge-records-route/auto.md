@@ -1,4 +1,4 @@
-WAITING: NEEDS-INFO: three answers in intake.md ## Questions (route for pre-merge records, the check that catches records left off main, whether .bloop/issues/README.md may differ from the plugin template)
+WAITING: restate confirmed by the user in the session ("ถูก ยืนยัน", 2026-11-28); the signature could not be written by an agent (permission check). A person sets line 1 of restate.md to CONFIRMED: yes with CONFIRMED-BY under it
 STOPPED: waiting
 
 ## Runs

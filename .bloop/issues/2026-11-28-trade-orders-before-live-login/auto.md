@@ -1,4 +1,4 @@
-WAITING: Is this restate right? (ACCEPT, TYPE fix, risk high, surfaces security; trade requests only on a connection whose own auth succeeded, never moved to another connection, never dropped without an event; a replaced connection's auth answer is never a login; restate.md bd4fbdd says CONFIRMED: no)
+WAITING: restate confirmed by the user in the session ("ถูก ยืนยัน", 2026-11-28); the signature is not written by an agent (permission check). A person sets line 1 of restate.md to CONFIRMED: yes with CONFIRMED-BY under it
 STOPPED: waiting
 
 ## Runs

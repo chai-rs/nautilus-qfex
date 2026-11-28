@@ -1,4 +1,4 @@
-WAITING: Approve this plan? (RISK medium; 2 slices: own build step via cargo clean -p nautilus-qfex, then a tested-tree hash line; warm no-change run 11 s to about 56 s; no starred product decision; spec.md bc1265b). Left for a person: the permission check blocked trust-level signatures earlier in this run
+WAITING: plan approved by the user in the session ("อนุมัติ", 2026-11-28); the signature is not written by an agent (permission check). A person sets APPROVED: yes in spec.md with APPROVED-BY under it
 STOPPED: waiting
 
 ## Runs
