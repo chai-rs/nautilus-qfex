@@ -1,5 +1,5 @@
-WAITING: none
-STOPPED: none
+WAITING: Is this restate right? (ACCEPT, TYPE fix, risk high, surfaces security; trade requests only on a connection whose own auth succeeded, never moved to another connection, never dropped without an event; a replaced connection's auth answer is never a login; restate.md bd4fbdd says CONFIRMED: no)
+STOPPED: waiting
 
 ## Runs
 
@@ -9,6 +9,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 2026-11-28T11:00Z | 2 | restate | no-intake | no-intake | not run: bin/job names debug for this bug, restate was started by mistake and stopped without writing |
 | 2 | 2026-11-28T11:40Z | 2 | debug | no-intake | no-intake (debugged) | ROOT-CAUSE in 1 round: orders via send_text replay before the next auth (20/20 forced, 50/50 unforced); a stale auth answer passes as Authenticated (20/20) |
+| 3 | 2026-11-28T12:05Z | 2 | restate | no-intake | awaiting-human | ACCEPT, fix, risk high, surfaces security; confirmation waits on a person |
 
 ## Answered by trust level
 
@@ -20,3 +21,4 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 ## Stops
 
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
+2026-11-28T12:05Z waiting: restate confirmation needs a person
