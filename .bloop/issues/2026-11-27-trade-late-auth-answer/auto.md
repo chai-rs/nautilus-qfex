@@ -1,5 +1,5 @@
-WAITING: decision.md is ESCALATE (RISK high): 1) accept the reading-only proof of the ConnectionChanged login branch, or send back to build for a check that forces it; 2) merge the run records PR with or before PR #16 so the NautilusTrader contract is on main; 3) agree a box 2 issue for the order path and the stale Authenticated. A person decides and signs APPROVED-BY
-STOPPED: waiting
+WAITING: none
+STOPPED: none
 
 ## Runs
 
@@ -9,6 +9,7 @@ One row per skill run, oldest first. `before` and `after` come from `bin/job`, n
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 2026-11-28T06:16Z | 4 | build | planned | built | 3 slices green, 173 tests, loop-a 0/90 (10/90 on main); draft PR #16 |
 | 2 | 2026-11-28T06:21Z | 5 | review | built | escalated | code PASS (0/0), security PASS (0 must, 1 should); approver ESCALATE |
+| 3 | 2026-11-28T07:55Z | 5 | (person) | escalated | reviewing | the user decided the 3 escalation points; `decision.md` moved to `review/round-1/decision.md`; back to build round 2 |
 
 ## Answered by trust level
 
@@ -24,3 +25,11 @@ Every question `loop.trustLevel` answered instead of a person, so nothing it dec
 
 One line each time a run ended, newest last. The reason is one of `done` `waiting` `broken` `stall` `budget` `user`.
 - 2026-11-28T06:21Z · waiting · approver escalated: untested ConnectionChanged branch, contract only on the records branch, order path issue not open
+
+## Person's decision on the round 1 escalation
+
+Asked in this session on 2026-11-28, answered by the user with the recommended option each time:
+
+1. `ConnectionChanged` branch at `src/websocket/client.rs:611` with no test: "ส่งกลับ build (Recommended)" (send it back to build for a check that forces a drop between the epoch check and the writer)
+2. Contract row only on the records branch: "merge records PR ก่อน (Recommended)" (merge the records PR, now #18, before #16)
+3. Deferred order path and stale `Authenticated`: "เปิด issue เลย (Recommended)" (opened as `2026-11-28-trade-orders-before-live-login`)
