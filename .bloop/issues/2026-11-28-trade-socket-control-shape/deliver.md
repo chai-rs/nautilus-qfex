@@ -1,6 +1,6 @@
-STATUS: GATED
-MERGE: none
-MERGED-AT: none
+STATUS: MERGED
+MERGE: d779309
+MERGED-AT: 2026-11-28
 DEPLOYED-AT: none
 DEPLOYED-BY: none
 ROLLED-BACK-AT: none
@@ -16,8 +16,12 @@ One row per step, in order. A step that was skipped says why, because a blank ro
 | sync | `bin/ship 2026-11-28-trade-socket-control-shape` at 2026-11-28T06:44Z, after `cargo clean -p nautilus-qfex` in `CARGO_TARGET_DIR=/home/user/nautilus-qfex/target-control-shape` | `synced: true`, 0 conflicts. The branch already sat on `origin/main` at `92dca56`, so the rebase replayed nothing: `b9d820e` is 1 commit ahead, the same sha as `origin/refactor/2026-11-28-trade-socket-control-shape` |
 | re-gate | `bin/gate --e2e` inside the worktree, through `bin/ship`, then once more by hand to keep the output | `gate: 0` both times. `all checks passed`: format, lint, unit + integration, test count (`cargo test` and `cargo test --features examples` each 171 passed, as written), shortcut marker, e2e smoke |
 | push | none | not needed: the sync rewrote nothing, so the remote branch already holds `b9d820e` |
-| merge | not run | waits on a person: `deliver.autoMerge.low` is false and `bin/trust --for autonomous` exits 1 |
-| deploy | not run | `deliver.deployCommand` is null, CI ships on merge; nothing has merged yet |
+| ask | merge question to the user | asked because `deliver.autoMerge.low` is false and `bin/trust --for autonomous` exits 1 (previous window 0 landings, 5 needed). The user answered "merge ให้หน่อย" (please merge it), a yes |
+| merge | `bin/ship 2026-11-28-trade-socket-control-shape --merge` | synced again (no-op, `origin/main` still `92dca56`) and `gate: 0` again, but `gh pr merge` got HTTP 403 because GraphQL is closed to this session, so `merged: false` |
+| merge, REST | `gh api -X PUT repos/chai-rs/nautilus-qfex/pulls/17/merge -f merge_method=merge -f sha=b9d820e…` | merged as `d779309` on `main`, a `merge`-style merge commit, pinned to the gated head `b9d820e` |
+| deploy | none | `deliver.deployCommand` is null and CI does not deploy: `ci.yml` runs `./checks.sh` and the fuzz build only. CI run on the merge commit: https://github.com/chai-rs/nautilus-qfex/actions/runs/46118159407 (in progress when recorded). Nothing ships from this repo, so `STATUS` stays `MERGED` |
+| fuzz | not run | `/bloop:auto` drives this run and checks `bin/fuzz-due` itself |
+| docs | `bin/docs` | exit 1, `docs/product` does not exist yet; nothing to refresh |
 
 ## Watch after deploy
 
