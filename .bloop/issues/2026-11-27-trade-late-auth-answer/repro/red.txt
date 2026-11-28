@@ -1,0 +1,75 @@
+# Raw red output, issue 2026-11-27-trade-late-auth-answer
+# Machine: Linux, 4 cores, CARGO_TARGET_DIR=/home/user/nautilus-qfex/target, base 5c63bd5 (main).
+# Stack backtraces (RUST_BACKTRACE was set) are cut after the panic message; nothing else is edited.
+
+## Loop A: the reported shape, 3 of 30 runs red
+# tests/exec_client.rs in the throwaway worktree, plus one test: socket_state_follows_the_trade_socket
+# as on main without its wait for the first subscribe before the drop. The whole binary ran 30 times:
+#   for i in $(seq 1 30); do target/debug/deps/exec_client-<hash>; done
+# Runs 8, 12 and 17 failed. Run 8:
+
+running 14 tests
+test bloop_debug_drop_right_after_connected ... FAILED
+
+failures:
+
+---- bloop_debug_drop_right_after_connected stdout ----
+
+thread 'bloop_debug_drop_right_after_connected' (8620) panicked at tests/exec_client.rs:385:13:
+venue refused: ["subscribe before auth"]
+   [backtrace cut]
+test result: FAILED. 13 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+
+## Loop B: the tightened loop, 20 of 20 runs red
+# src/websocket/client.rs unit test trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth
+#   for i in $(seq 1 20); do target/debug/deps/nautilus_qfex-<hash> trade_late_auth; done
+# Every run printed the same left/right. Run 1:
+
+
+running 1 test
+test websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth ... FAILED
+
+failures:
+
+---- websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth stdout ----
+
+thread 'websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth' (10681) panicked at src/websocket/client.rs:1149:9:
+assertion `left == right` failed: the next socket gets its own auth first, and the session frames once
+  left: [String("subscribe"), String("auth"), String("subscribe")]
+ right: [String("auth"), String("subscribe")]
+
+
+failures:
+    websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 143 filtered out; finished in 0.60s
+
+
+## The check, run without any probe: red, 20 of 20 runs
+# src/websocket/client.rs replaced by repro/src/websocket/client.rs.txt in a worktree at 5c63bd5, then:
+#   cargo test --lib trade_late_auth_answer
+
+     Running unittests src/lib.rs (/home/user/nautilus-qfex/target/debug/deps/nautilus_qfex-0407fb27e789ca5d)
+
+running 1 test
+test websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth ... FAILED
+
+failures:
+
+---- websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth stdout ----
+
+thread 'websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth' (28363) panicked at src/websocket/client.rs:1155:9:
+assertion `left == right` failed: the next socket gets its own auth first, and the session frames once
+  left: [String("subscribe"), String("auth"), String("subscribe")]
+ right: [String("auth"), String("subscribe")]
+
+
+failures:
+    websocket::client::tests::trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 143 filtered out; finished in 0.71s
+
+error: test failed, to rerun pass `--lib`
+
+# The whole unit suite with the check in place: only the check is red.
+test result: FAILED. 143 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
