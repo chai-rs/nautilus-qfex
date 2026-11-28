@@ -1,6 +1,6 @@
-STATUS: GATED
-MERGE: none
-MERGED-AT: none
+STATUS: MERGED
+MERGE: 4134e4c
+MERGED-AT: 2026-11-28
 DEPLOYED-AT: none
 DEPLOYED-BY: none
 ROLLED-BACK-AT: none
@@ -14,8 +14,11 @@ Dates are `YYYY-MM-DD`. They are headers rather than prose because `bin/metrics`
 | merge condition | `git grep -n send_text_on_connection origin/main -- docs/external/nautilustrader/README.md` after `git fetch`, `origin/main` at `4a32ba5` (PR #18 merged) | lines 16 and 28 printed, exit 0. The condition in `decision.md` holds |
 | sync | `bin/ship 2026-11-27-trade-late-auth-answer` | rebased onto `origin/main` `4a32ba5`, 0 conflicts. Head `575c901` became `5721890`. 4 commits remain on the branch; the record commits already on `main` through #18 dropped out as already applied, and the 3 code commits are unchanged by `git range-diff` |
 | re-gate | `bin/gate --e2e` inside the worktree, with `CARGO_TARGET_DIR=/home/user/nautilus-qfex/target-late-auth-deliver`, a fresh dir | exit 0 |
-| push | not yet run | the rebase rewrote the branch, so the push is `--force-with-lease`. It waits on a person's yes |
-| merge | not yet run | waits on the push |
+| push | `bin/ship 2026-11-27-trade-late-auth-answer --push`, after the person said "force-push แล้ว merge" (force-push, then merge) | synced again with nothing to do on `4a32ba5`, gate exit 0 again in the same fresh target dir, then `git push --force-with-lease`. PR #16 head read `5721890` afterwards |
+| merge | GitHub merge of PR #16, `merge_method: merge`, `expectedHeadSha: 5721890cbae11500fb7e1bf9a6af60cac1c15bbc`, right after the merge-condition grep held on `4a32ba5` | merged as `4134e4c` on `main`, parents `4a32ba5` and `5721890`. `gh pr merge` was not used, it was refused with 403 earlier in this session |
+| fuzz | `bin/fuzz-due --merged` | `due: false`, no `fuzz` section in `.bloop/config.json` |
+| deploy | none | `deliver.deployCommand` is null and this crate ships nothing on merge. CI on the merge commit: run `46123378992` (`ci`, push to `main`), in progress when this was written. `STATUS` stays `MERGED` |
+| docs | `bin/docs` | exit 1, `docs/product` does not exist yet. Nothing to refresh |
 
 ## Why a person merges this
 
@@ -27,7 +30,7 @@ Not merged without asking. Three of the five conditions fail:
 - nothing in `spec.md` `## Context` is a protected path (`src/websocket/client.rs`, `src/execution/mod.rs`, `tests/exec_client.rs`, issue files) ✓
 - `loop.trustLevel` is `autonomous` ✓
 
-The person said "merge for me" about PR #18 and PR #16 in this session, after being told #18 goes first.
+The person said "merge for me" about PR #18 and PR #16 in this session, after being told #18 goes first, and then "force-push แล้ว merge" (force-push, then merge) to the push question.
 
 ## Watch after deploy
 
