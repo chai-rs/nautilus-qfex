@@ -1,8 +1,9 @@
 # Status
 
 Date: 11 Nov 2026, updated 12 Nov 2026 (section "Parity with `nautilus-lighter`"), 13 Nov
-2026 (section "Tooling around the adapter") and 27 Nov 2026 (socket state of both sockets,
-reconnect command of the data client, test counts). Plan: `docs/PLAN.md`.
+2026 (section "Tooling around the adapter"), 27 Nov 2026 (socket state of both sockets,
+reconnect command of the data client, test counts) and 28 Nov 2026 (trade session frames bound to
+their connection). Plan: `docs/PLAN.md`.
 
 ## Summary
 
@@ -73,7 +74,7 @@ server only.
 | `http` authenticated (`/user/positions`, `/user/trade`, historic orders, fees, leverage) | UNVERIFIED on the venue: no key. Mock; the fixtures are hand-made from the docs |
 | `signing` | HMAC checked against `openssl` and RFC 4231 case 2. UNVERIFIED on the venue (see Signing) |
 | `websocket` MDS client (subscribe, ping, reconnect, resubscribe) | Live for subscribe and data. Reconnect and resubscribe: mock |
-| `websocket` trade client (auth, session start, reconnect, socket state) | UNVERIFIED on the venue. Mock. Known race, not fixed: if the socket drops between the venue's `auth` answer and its handling, the private `subscribe` frames can reach the next socket before its `auth` (the stand-in saw it in 1 to 2 runs of 100, 27 Nov 2026); open as `2026-11-27-trade-late-auth-answer` |
+| `websocket` trade client (auth, session start, reconnect, socket state) | UNVERIFIED on the venue. Mock. The `auth` frame and the private `subscribe` and cancel-on-disconnect frames go out only on the connection they belong to (`send_text_on_connection`), so a socket that drops between the venue's `auth` answer and its handling, or a late reconnect notice, puts nothing on the next socket before its own `auth`: unit checks `trade_late_auth_answer_sends_nothing_on_the_next_socket_before_its_auth` and `trade_stale_reconnect_sends_one_auth_and_one_session_on_the_next_socket` (fixed 28 Nov 2026, was 10 runs of 90 in the whole `exec_client` binary). Orders sent with `send` during a reconnect still use the ordinary send and can be replayed on the next socket before its `auth` |
 | `book` (pulsed book) | Live: recorded `level2` frames; one book per 500 ms seen in the run |
 | `data` client | Live: the `data_tester` run. Mock: `tests/data_client.rs` on recorded frames |
 | Socket state (`SocketStateChanged`, venue `QFEX`, endpoints `market_data` and `trade`) | Mock: `socket_state_follows_the_market_data_socket` (connect, drop, reconnect, deliberate disconnect, connect again) and the unit test `mds_state_sink_sees_connect_loss_and_reconnect`. Trade socket: Mock: `socket_state_follows_the_trade_socket` (connect, drop, reconnect with a second login, deliberate disconnect, connect again). `Connected` means the transport is up, not logged in; if the venue refuses the login, the client closes the socket deliberately, so an actor sees `Connected` and no `Disconnected`. Under a `LiveNode`, a controller reconnect command for the data client, endpoint `market_data`, reaches the socket: `Accepted` while connected (the socket drops, reconnects and resubscribes), `Closed` before `connect()` and after `disconnect()`. Mock: `reconnect_command_reconnects_the_market_data_socket` (inside a `SocketReconnectRegistry` scope) and the unit test `mds_reconnect_request_follows_the_connection`. The trade socket registers no reconnect handler: its control is built on the first `connect()`, outside the node's registry scope, so a reconnect command for the execution client answers `Unsupported`; a later handler for it would need the control built in `new` |

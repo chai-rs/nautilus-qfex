@@ -1009,8 +1009,6 @@ async fn socket_state_follows_the_trade_socket() {
     connected.unwrap();
     assert_eq!(next_trade_state(&mut system).await, SocketState::Connected);
 
-    // Dropped after the login, as `Harness::connect` waits: a drop between the `auth` answer
-    // and its handling is `2026-11-27-trade-late-auth-answer`.
     h.venue.wait_frames("subscribe", 1).await;
     h.venue.drop_socket();
     assert_eq!(
